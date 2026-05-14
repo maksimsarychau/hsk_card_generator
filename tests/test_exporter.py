@@ -107,14 +107,16 @@ class ExporterTests(unittest.TestCase):
         guide = next(part for part in build_card_parts(HSK1_SAMPLE[0], "chinese", pos, design) if part.role == "hanziGuide")
         self.assertAlmostEqual(min(x for x, _, _ in guide.mesh.vertices), 30 * 0.073, delta=0.05)
 
-    def test_hanzi_guide_and_text_start_on_card_surface(self) -> None:
+    def test_hanzi_guide_and_text_are_embedded_into_card_surface(self) -> None:
         design = CardDesign()
         pos = CardPosition(1, 0, 0, 0, 0, 0, design.widthMm, design.heightMm)
         parts = build_card_parts(HSK1_SAMPLE[0], "chinese", pos, design)
         text = next(part for part in parts if part.role == "frontText")
         guide = next(part for part in parts if part.role == "hanziGuide")
-        self.assertAlmostEqual(min(z for _, _, z in text.mesh.vertices), design.thicknessMm, places=6)
-        self.assertAlmostEqual(min(z for _, _, z in guide.mesh.vertices), design.thicknessMm, places=6)
+        self.assertLess(min(z for _, _, z in text.mesh.vertices), design.thicknessMm)
+        self.assertLess(min(z for _, _, z in guide.mesh.vertices), design.thicknessMm)
+        self.assertGreater(max(z for _, _, z in text.mesh.vertices), design.thicknessMm)
+        self.assertGreater(max(z for _, _, z in guide.mesh.vertices), design.thicknessMm)
         guide_widths = [abs(guide.mesh.vertices[face[1]][0] - guide.mesh.vertices[face[0]][0]) for face in guide.mesh.faces]
         self.assertTrue(any(width >= 0.34 for width in guide_widths))
 

@@ -21,6 +21,10 @@ ROLE_COLORS: dict[str, str] = {
 }
 
 
+SURFACE_EMBED_MM = 0.03
+CHINESE_RASTER_PX = 192
+
+
 @dataclass
 class Mesh:
     name: str
@@ -201,8 +205,9 @@ def build_card_parts(
     w, h = position.width, position.height
     t = design.thicknessMm
     z_top = t
-    guide_z = z_top
-    text_z = z_top
+    surface_z = max(0, z_top - SURFACE_EMBED_MM)
+    guide_z = surface_z
+    text_z = surface_z
     base_meshes = _base_meshes(word.index, x, y, w, h, t, design)
     front_text_meshes = _front_text_proxy(word, language, x, y, text_z, w, h, design)
     hanzi_guide_meshes = _hanzi_guide_meshes(word.index, language, x, y, guide_z, w, h, design, word.text_for(language))
@@ -210,7 +215,7 @@ def build_card_parts(
         hanzi_guide_meshes = _subtract_footprints(hanzi_guide_meshes, front_text_meshes, clearance=0.08 * _card_scale(w, h))
     role_meshes: dict[str, list[Mesh]] = {
         "base": base_meshes,
-        "border": _border_meshes(word.index, x, y, z_top, w, h, design),
+        "border": _border_meshes(word.index, x, y, surface_z, w, h, design),
         "frontText": front_text_meshes,
         "backNumber": _back_number_meshes(word.index, x, y, w, h, design) if design.backNumberMode == "deboss_colored" else [],
         "hanziGuide": hanzi_guide_meshes,
@@ -300,7 +305,7 @@ def _base_meshes(index: int, x: float, y: float, w: float, h: float, thickness: 
 
 def _border_meshes(index: int, x: float, y: float, z: float, w: float, h: float, design: CardDesign) -> list[Mesh]:
     bw = max(0.2, design.borderWidthMm)
-    bh = max(0.05, design.borderHeightMm)
+    bh = _raised_height(design.borderHeightMm)
     return _rounded_border_meshes(f"card_{index:03d}_border", x, y, z, w, h, bw, bh, _corner_radius(design, w, h))
 
 
@@ -324,8 +329,8 @@ def _front_text_proxy(
     inset_y = h * (0.14 if language == "chinese" else 0.18)
     area_x, area_y = x + inset_x, y + inset_y
     area_w, area_h = w - inset_x * 2, h - inset_y * 2
-    px = 96 if language == "chinese" else 128
-    py = 96 if language == "chinese" else 96
+    px = CHINESE_RASTER_PX if language == "chinese" else 128
+    py = CHINESE_RASTER_PX if language == "chinese" else 96
     runs = text_runs(text, language, px, py)
     if not runs:
         return _fallback_text_proxy(word, language, x, y, z, w, h, design)
@@ -352,7 +357,7 @@ def _front_text_proxy(
                 z,
                 block_w,
                 block_h,
-                max(0.05, design.textHeightMm),
+                _raised_height(design.textHeightMm),
             )
         )
     return meshes
@@ -369,7 +374,7 @@ def _multi_hanzi_text_meshes(
     meshes: list[Mesh] = []
     for char_index, char in enumerate(chars):
         cell_x, cell_y, cell_w, cell_h = cells[char_index]
-        runs = text_runs(char, "chinese", 96, 96)
+        runs = text_runs(char, "chinese", CHINESE_RASTER_PX, CHINESE_RASTER_PX)
         if not runs:
             continue
         min_rx = min(rx for rx, _, _, _ in runs)
@@ -392,7 +397,7 @@ def _multi_hanzi_text_meshes(
                     z,
                     block_w,
                     block_h,
-                    max(0.05, design.textHeightMm),
+                    _raised_height(design.textHeightMm),
                 )
             )
     return meshes
@@ -412,7 +417,7 @@ def _fallback_text_proxy(
     line_count = 1 if language in ("chinese", "pinyin") or len(text) <= 14 else 2
     max_text_w = w * (0.72 if language == "chinese" else 0.78)
     line_h = h * (0.16 if line_count == 2 else 0.2)
-    proxy_h = max(0.05, design.textHeightMm)
+    proxy_h = _raised_height(design.textHeightMm)
     meshes: list[Mesh] = []
     for line in range(line_count):
         length_factor = min(1.0, max(0.22, len(text) / (4 if language == "chinese" else 18)))
@@ -481,7 +486,11 @@ def _hanzi_guide_meshes(
 
 
 def _hanzi_guide_height(design: CardDesign, card_scale: float = 1.0) -> float:
-    return max(0.16, design.borderHeightMm * 0.9 * card_scale) * max(0.2, design.hanziGuideScale)
+    return max(0.16, design.borderHeightMm * 0.9 * card_scale) * max(0.2, design.hanziGuideScale) + SURFACE_EMBED_MM
+
+
+def _raised_height(value: float) -> float:
+    return max(0.05, value) + SURFACE_EMBED_MM
 
 
 def _card_scale(w: float, h: float) -> float:

@@ -62,20 +62,7 @@ def _pillow_text_runs(text: str, language: str, width_px: int, height_px: int) -
         draw.text((x, y), line, fill=0, font=font)
         y += line_height
 
-    pixels = image.load()
-    runs: list[tuple[int, int, int, int]] = []
-    for row in range(height_px):
-        start: int | None = None
-        for col in range(width_px):
-            ink = pixels[col, row] < 190
-            if ink and start is None:
-                start = col
-            elif not ink and start is not None:
-                runs.append((start, row, col - start, 1))
-                start = None
-        if start is not None:
-            runs.append((start, row, width_px - start, 1))
-    return runs
+    return _merge_vertical_runs(_image_to_row_runs(image, width_px, height_px))
 
 
 def _fit_lines(text: str, language: str, width_px: int, height_px: int) -> tuple[list[str], int]:
@@ -204,8 +191,8 @@ def _render_lines_to_runs(lines: tuple[str, ...], font_px: int, width_px: int, h
         user.DrawTextW(hdc, line, -1, ctypes.byref(rect), 0x00000001 | 0x00000004 | 0x00000020)
         y += line_height
 
-    buffer = (ctypes.c_ubyte * (width_px * height_px * 4)).from_address(bits.value)
     runs: list[tuple[int, int, int, int]] = []
+    buffer = (ctypes.c_ubyte * (width_px * height_px * 4)).from_address(bits.value)
     for row in range(height_px):
         start: int | None = None
         for col in range(width_px):
@@ -225,4 +212,41 @@ def _render_lines_to_runs(lines: tuple[str, ...], font_px: int, width_px: int, h
     gdi.DeleteObject(font)
     gdi.DeleteObject(hbmp)
     gdi.DeleteDC(hdc)
+    return _merge_vertical_runs(runs)
+
+
+def _image_to_row_runs(image: object, width_px: int, height_px: int) -> list[tuple[int, int, int, int]]:
+    pixels = image.load()
+    runs: list[tuple[int, int, int, int]] = []
+    for row in range(height_px):
+        start: int | None = None
+        for col in range(width_px):
+            ink = pixels[col, row] < 190
+            if ink and start is None:
+                start = col
+            elif not ink and start is not None:
+                runs.append((start, row, col - start, 1))
+                start = None
+        if start is not None:
+            runs.append((start, row, width_px - start, 1))
     return runs
+
+
+def _merge_vertical_runs(runs: list[tuple[int, int, int, int]]) -> list[tuple[int, int, int, int]]:
+    active: dict[tuple[int, int], tuple[int, int, int, int]] = {}
+    merged: list[tuple[int, int, int, int]] = []
+    for x, y, w, h in runs:
+        key = (x, w)
+        previous = active.get(key)
+        if previous and previous[1] + previous[3] == y:
+            active[key] = (previous[0], previous[1], previous[2], previous[3] + h)
+        else:
+            if previous:
+                merged.append(previous)
+            active[key] = (x, y, w, h)
+        for other_key in list(active):
+            if other_key != key and active[other_key][1] + active[other_key][3] < y:
+                merged.append(active.pop(other_key))
+    merged.extend(active.values())
+    merged.sort(key=lambda item: (item[1], item[0], item[2], item[3]))
+    return merged

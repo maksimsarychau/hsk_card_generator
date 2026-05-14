@@ -8,6 +8,7 @@ The current implementation can run in a bare Python environment on Windows, and 
 - configurable printer, card size, rows/columns, gap, border, number, and Hanzi guide;
 - browser-local project state;
 - JSON/CSV import;
+- editable HSK set corrections saved in browser local storage, with JSON import/export for moving corrections between machines;
 - local dictionary enrichment for the bundled HSK1 sample without overwriting locked manual edits;
 - ZIP export with STL role files, three 3MF compatibility variants, README mapping, and source JSON.
 
@@ -53,6 +54,18 @@ http://127.0.0.1:8000
 ```
 
 Exports are written to `exports/` and are mounted out of the container by the compose file.
+
+## HSK Set Edits
+
+Built-in HSK sets can be edited directly in the table. Use:
+
+- `Save edits` to save changed translations/pinyin for the selected HSK set in browser local storage.
+- `Load original` to reload the clean bundled HSK set without applying saved edits.
+- `Export edits` to download the saved corrections JSON.
+- `Import edits` to load a corrections JSON back into the browser.
+- `Clear edits` to remove saved corrections for the selected HSK set.
+
+These corrections are separate from project state and are applied automatically when the matching HSK set is loaded.
 
 ## Test
 

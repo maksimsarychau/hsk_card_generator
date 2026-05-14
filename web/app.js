@@ -12,8 +12,10 @@ let pendingImportMode = "json";
 let datasets = [];
 let activeDatasetId = "hsk1_old";
 let presets = [];
+let datasetBaseWords = [];
 
 const $ = (id) => document.getElementById(id);
+const CORRECTIONS_KEY = "hsk-card-dataset-corrections";
 
 async function init() {
   loadPresets();
@@ -30,6 +32,7 @@ async function init() {
     updateRangeBounds(words.length, false);
     await fillKnownTranslations();
     renderTable();
+    renderCorrectionsStatus();
     await updatePreview();
   } else {
     await loadSample();
@@ -38,11 +41,17 @@ async function init() {
 
 function bindEvents() {
   $("loadSampleBtn").addEventListener("click", loadSample);
+  $("loadOriginalBtn").addEventListener("click", () => loadDataset(activeDatasetId, { ignoreCorrections: true }));
   $("datasetSelect").addEventListener("change", () => loadDataset($("datasetSelect").value));
   $("importJsonBtn").addEventListener("click", () => openImport("json"));
   $("importCsvBtn").addEventListener("click", () => openImport("csv"));
+  $("importCorrectionsBtn").addEventListener("click", () => openImport("corrections"));
   $("fileInput").addEventListener("change", handleFile);
   $("enrichBtn").addEventListener("click", enrich);
+  $("regenerateBtn").addEventListener("click", regenerateAll);
+  $("saveCorrectionsBtn").addEventListener("click", saveDatasetCorrections);
+  $("exportCorrectionsBtn").addEventListener("click", exportDatasetCorrections);
+  $("clearCorrectionsBtn").addEventListener("click", clearDatasetCorrections);
   $("exportBtn").addEventListener("click", exportZip);
   $("loadPresetBtn").addEventListener("click", loadSelectedPreset);
   $("savePresetBtn").addEventListener("click", saveCurrentPreset);
@@ -95,8 +104,13 @@ async function loadDataset(datasetId, options = {}) {
   const data = await response.json();
   if (!data.ok) return;
   words = normalizeWords(data.dataset.words);
+  datasetBaseWords = normalizeWords(data.dataset.words);
+  if (!options.ignoreCorrections) {
+    words = applyDatasetCorrections(words, activeDatasetId);
+  }
   updateRangeBounds(words.length, options.keepRange === true);
   renderTable();
+  renderCorrectionsStatus();
   await updatePreview();
 }
 
@@ -110,12 +124,18 @@ async function handleFile(event) {
   const file = event.target.files[0];
   if (!file) return;
   const text = await file.text();
+  if (pendingImportMode === "corrections") {
+    importDatasetCorrections(JSON.parse(text));
+    return;
+  }
   words = pendingImportMode === "csv" ? parseCsv(text) : JSON.parse(text);
   words = normalizeWords(words);
+  datasetBaseWords = [];
   activeDatasetId = "custom";
   updateRangeBounds(words.length, false);
   await fillKnownTranslations();
   renderTable();
+  renderCorrectionsStatus();
   await updatePreview();
 }
 
@@ -163,7 +183,7 @@ function renderTable() {
       const row = Number(input.dataset.row);
       const field = input.dataset.field;
       words[row][field] = input.value;
-      if (field !== "chinese") {
+      if (["pinyin", "english", "target", "hungarian"].includes(field)) {
         words[row].lockedFields = Array.from(new Set([...(words[row].lockedFields || []), field]));
       }
       schedulePreview();
@@ -231,8 +251,17 @@ async function enrich() {
   if (data.ok) {
     words = normalizeWords(data.words);
     renderTable();
+    renderCorrectionsStatus();
     await updatePreview();
   }
+}
+
+async function regenerateAll() {
+  clearTimeout(previewTimer);
+  saveLocal();
+  setCorrectionsStatus("Regenerating all plates from the current table...");
+  await updatePreview();
+  renderCorrectionsStatus();
 }
 
 let previewTimer = null;
@@ -588,6 +617,144 @@ async function exportZip() {
 
 function saveLocal() {
   localStorage.setItem("hsk-card-project", JSON.stringify({ words, request: buildRequest() }));
+}
+
+function loadAllCorrections() {
+  try {
+    const raw = localStorage.getItem(CORRECTIONS_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistAllCorrections(corrections) {
+  localStorage.setItem(CORRECTIONS_KEY, JSON.stringify(corrections));
+}
+
+function activeCorrectionSet() {
+  return loadAllCorrections()[activeDatasetId] || null;
+}
+
+function applyDatasetCorrections(sourceWords, datasetId) {
+  const correctionSet = loadAllCorrections()[datasetId];
+  if (!correctionSet?.entries) return sourceWords;
+  return sourceWords.map((word) => {
+    const patch = correctionSet.entries[String(word.index)];
+    if (!patch) return word;
+    return {
+      ...word,
+      ...Object.fromEntries(["chinese", "pinyin", "english", "target", "hungarian"].filter((field) => patch[field] !== undefined).map((field) => [field, patch[field]])),
+      lockedFields: Array.from(new Set([...(word.lockedFields || []), ...(patch.lockedFields || [])])),
+    };
+  });
+}
+
+function buildDatasetCorrectionSet() {
+  if (activeDatasetId === "custom") return null;
+  const baseByIndex = new Map(datasetBaseWords.map((word) => [word.index, word]));
+  const entries = {};
+  for (const word of words) {
+    const base = baseByIndex.get(word.index) || {};
+    const patch = { chinese: word.chinese || base.chinese || "" };
+    let changed = false;
+    for (const field of ["chinese", "pinyin", "english", "target", "hungarian"]) {
+      const currentValue = word[field] || "";
+      const baseValue = base[field] || "";
+      if (currentValue !== baseValue) {
+        patch[field] = currentValue;
+        changed = true;
+      }
+    }
+    const lockedFields = (word.lockedFields || []).filter((field) => ["pinyin", "english", "target", "hungarian"].includes(field));
+    if (lockedFields.length) {
+      patch.lockedFields = lockedFields;
+      changed = true;
+    }
+    if (changed) entries[String(word.index)] = patch;
+  }
+  return {
+    version: 1,
+    datasetId: activeDatasetId,
+    updatedAt: new Date().toISOString(),
+    entries,
+  };
+}
+
+function saveDatasetCorrections() {
+  if (activeDatasetId === "custom") {
+    setCorrectionsStatus("Custom imports are saved as the current project, not as HSK set edits.");
+    return;
+  }
+  const correctionSet = buildDatasetCorrectionSet();
+  const all = loadAllCorrections();
+  if (Object.keys(correctionSet.entries).length) all[activeDatasetId] = correctionSet;
+  else delete all[activeDatasetId];
+  persistAllCorrections(all);
+  renderCorrectionsStatus();
+}
+
+function exportDatasetCorrections() {
+  const correctionSet = activeCorrectionSet() || buildDatasetCorrectionSet();
+  if (!correctionSet || activeDatasetId === "custom") {
+    setCorrectionsStatus("No HSK set edits to export.");
+    return;
+  }
+  const payload = {
+    type: "hsk-card-generator-dataset-corrections",
+    exportedAt: new Date().toISOString(),
+    corrections: correctionSet,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `${activeDatasetId}-edits.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  setCorrectionsStatus(`Exported ${Object.keys(correctionSet.entries || {}).length} saved edit(s).`);
+}
+
+function importDatasetCorrections(payload) {
+  const correctionSet = payload.corrections || payload;
+  const datasetId = correctionSet.datasetId || activeDatasetId;
+  if (!datasetId || !correctionSet.entries) {
+    setCorrectionsStatus("Import failed: edits JSON has no datasetId or entries.");
+    return;
+  }
+  const all = loadAllCorrections();
+  all[datasetId] = {
+    version: 1,
+    ...correctionSet,
+    datasetId,
+    importedAt: new Date().toISOString(),
+  };
+  persistAllCorrections(all);
+  if (datasetId === activeDatasetId && datasetBaseWords.length) {
+    words = applyDatasetCorrections(datasetBaseWords.map((word) => ({ ...word })), activeDatasetId);
+    renderTable();
+    schedulePreview();
+    saveLocal();
+  }
+  renderCorrectionsStatus();
+}
+
+function clearDatasetCorrections() {
+  const all = loadAllCorrections();
+  delete all[activeDatasetId];
+  persistAllCorrections(all);
+  renderCorrectionsStatus();
+}
+
+function renderCorrectionsStatus() {
+  const set = activeCorrectionSet();
+  const count = set?.entries ? Object.keys(set.entries).length : 0;
+  setCorrectionsStatus(activeDatasetId === "custom" ? "Custom import: edits are stored in the current project." : `${count} saved HSK edit(s) for ${activeDatasetId}.`);
+}
+
+function setCorrectionsStatus(message) {
+  const node = $("correctionsStatus");
+  if (node) node.textContent = message || "";
 }
 
 function loadPresets() {
