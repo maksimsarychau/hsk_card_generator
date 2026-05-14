@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HSK Card Generator</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="panel input-panel">
+        <div class="panel-header">
+          <div>
+            <h1>HSK Card Generator</h1>
+            <p>A1 mini plate planner and 3MF/STL spike</p>
+          </div>
+          <label class="dataset-select">
+            HSK set
+            <select id="datasetSelect"></select>
+          </label>
+        </div>
+
+        <div class="toolbar">
+          <button id="loadSampleBtn" title="Reload selected HSK set">Reload set</button>
+          <button id="importJsonBtn">Import JSON</button>
+          <button id="importCsvBtn">Import CSV</button>
+          <button id="enrichBtn">Enrich</button>
+          <input id="fileInput" type="file" accept=".json,.csv,.txt" hidden />
+        </div>
+
+        <div class="range-row">
+          <label>
+            Range start
+            <input id="rangeStart" type="range" min="1" max="150" value="1" />
+            <input id="rangeStartNumber" type="number" min="1" max="150" value="1" />
+          </label>
+          <label>
+            Range end
+            <input id="rangeEnd" type="range" min="1" max="150" value="50" />
+            <input id="rangeEndNumber" type="number" min="1" max="150" value="50" />
+          </label>
+        </div>
+
+        <div class="language-row">
+          <label>
+            Extra language
+            <select id="extraLanguagePreset">
+              <option value="hungarian" selected>Hungarian</option>
+              <option value="german">German</option>
+              <option value="spanish">Spanish</option>
+              <option value="french">French</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <label>
+            Label
+            <input id="extraLanguageLabel" type="text" value="Hungarian" />
+          </label>
+        </div>
+
+        <div class="table-wrap">
+          <table id="wordTable">
+            <thead>
+              <tr></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="preview-column">
+        <div class="preview-header">
+          <div>
+            <h2>Live plate fill</h2>
+            <p id="layoutSummary">Calculating...</p>
+          </div>
+          <div class="segmented" role="group" aria-label="Preview mode">
+            <button class="active" data-mode="front">Front</button>
+            <button data-mode="back">Back physical</button>
+            <button data-mode="raw" title="Debug view of the raw underside number before physically flipping the card">Underside debug</button>
+          </div>
+        </div>
+        <div id="warnings" class="warnings"></div>
+        <div id="plates" class="plates"></div>
+      </section>
+
+      <section class="panel settings-panel">
+        <h2>Settings</h2>
+        <div class="preset-tools">
+          <label>
+            Preset
+            <select id="presetSelect"></select>
+          </label>
+          <label>
+            Name
+            <input id="presetName" type="text" value="My preset" />
+          </label>
+          <button id="loadPresetBtn">Load</button>
+          <button id="savePresetBtn">Save</button>
+          <button id="deletePresetBtn">Delete</button>
+        </div>
+        <div class="settings-grid">
+          <label>Plate W <input id="plateWidth" type="number" value="180" step="0.1" /></label>
+          <label>Plate D <input id="plateDepth" type="number" value="180" step="0.1" /></label>
+          <label>Margin <input id="plateMargin" type="number" value="0" step="0.1" /></label>
+          <label>Card W <input id="cardWidth" type="number" value="30" step="0.1" /></label>
+          <label>Card H <input id="cardHeight" type="number" value="30" step="0.1" /></label>
+          <label>Thickness <input id="thickness" type="number" value="2" step="0.1" /></label>
+          <label>Corner R <input id="cornerRadius" type="number" value="3" min="0" step="0.1" /></label>
+          <label>Gap <input id="gap" type="number" value="2.8" step="0.1" /></label>
+          <label>Rows <input id="rows" type="text" value="auto" /></label>
+          <label>Columns <input id="columns" type="text" value="auto" /></label>
+          <label>Border W <input id="borderWidth" type="number" value="1" step="0.1" /></label>
+          <label>Border H <input id="borderHeight" type="number" value="0.45" step="0.05" /></label>
+          <label>Text H <input id="textHeight" type="number" value="0.55" step="0.05" /></label>
+          <label>Back depth <input id="backDepth" type="number" value="0.4" step="0.05" /></label>
+          <label>Chinese scale <input id="chineseTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
+          <label>Pinyin scale <input id="pinyinTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
+          <label>English scale <input id="englishTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
+          <label>Russian scale <input id="targetTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
+          <label>Hungarian scale <input id="hungarianTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
+          <label>Hanzi guide scale <input id="hanziGuideScale" type="range" min="0.5" max="1.8" value="1" step="0.05" /></label>
+          <label>
+            Hanzi guide
+            <select id="hanziGuide">
+              <option value="none">None</option>
+              <option value="tian_4" selected>4-part</option>
+              <option value="mi_8">8-part</option>
+            </select>
+          </label>
+          <label>
+            Back number
+            <select id="backMode">
+              <option value="deboss" selected>Deboss</option>
+              <option value="deboss_colored">Deboss + color</option>
+            </select>
+          </label>
+        </div>
+
+        <button id="exportBtn" class="primary">Export ZIP</button>
+        <pre id="exportResult" class="export-result"></pre>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

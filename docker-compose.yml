@@ -1,0 +1,13 @@
+services:
+  hsk-card-generator:
+    build:
+      context: .
+    container_name: hsk-card-generator
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./exports:/app/exports
+    restart: unless-stopped

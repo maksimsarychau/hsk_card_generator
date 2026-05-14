@@ -1,0 +1,13 @@
+{
+  "name": "hsk-card-generator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HSK 3D printable card generator geometry spike and web preview.",
+  "scripts": {
+    "dev": "python server.py",
+    "test": "python -m unittest discover -s tests"
+  },
+  "notes": {
+    "targetStack": "The production target is Next.js + TypeScript frontend and a Python FastAPI worker. This spike is dependency-free because the current environment has no working npm/FastAPI/font tooling."
+  }
+}
