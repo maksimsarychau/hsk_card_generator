@@ -10,6 +10,10 @@ The current implementation can run in a bare Python environment on Windows, and 
 - JSON/CSV import;
 - editable HSK set corrections saved in browser local storage, with JSON import/export for moving corrections between machines;
 - local dictionary enrichment for the bundled HSK1 sample without overwriting locked manual edits;
+- playable-core domino mode with compact decks, doubles as branch points, sequential bridge tiles, configurable language order, answer sheets, and generated game rules;
+- click-to-open card inspector with enlarged preview, base thickness, total model height, fitted font size, and back-number dimensions;
+- printable game-plan exports for matching, memory, pair cards, domino, modular expansion, and mixed challenge modes, with deterministic simulator output;
+- exported print profile recommendations for Bambu A1 mini quality/material-saver settings;
 - ZIP export with STL role files, three 3MF compatibility variants, README mapping, and source JSON.
 
 ## Run
@@ -66,6 +70,25 @@ Built-in HSK sets can be edited directly in the table. Use:
 - `Clear edits` to remove saved corrections for the selected HSK set.
 
 These corrections are separate from project state and are applied automatically when the matching HSK set is loaded.
+
+## Domino Mode
+
+Switch `Game Engine -> Mode` to `Domino playable core` to generate physical domino tiles instead of separate language plates. The first implementation supports:
+
+- compact decks: one double per word plus sequential bridge tiles;
+- complete-cycle and target-count generation options stored in presets;
+- doubles marked as branch points;
+- two mirrored debossed back IDs per tile;
+- configurable role colors for 3MF export;
+- `source/tile-plan.json`, `answer_sheets/domino.*`, and `rules/<language>/*.md` in the export ZIP.
+
+Other game modes now export `source/game-plan.json`, mode-specific answer sheets, rules, and simulator state. Pair, modular expansion, and mixed challenge modes use tile geometry; matching and memory reuse flashcard plates with game-specific rules and answer sheets.
+
+## Print Notes
+
+`Thickness` controls the base body thickness. Bambu Studio may report a taller object because raised text, borders, Hanzi guides, double markers, and optional physical plate labels sit above the base. The export README and manifest include both `baseThicknessMm` and `totalModelHeightMm`.
+
+Every export includes `print_profiles/bambu_a1_mini_quality.md`, `print_profiles/bambu_a1_mini_material_saver.md`, and `print_profiles/profile-summary.json`. The 3MF files include standard metadata with the dataset, range, game mode, recommended nozzle, and layer height. Bambu-specific automatic project-profile import remains experimental until tested in Bambu Studio.
 
 ## Test
 

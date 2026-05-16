@@ -14,65 +14,144 @@
             <h1>HSK Card Generator</h1>
             <p>A1 mini plate planner and 3MF/STL spike</p>
           </div>
-          <label class="dataset-select">
-            HSK set
-            <select id="datasetSelect"></select>
-          </label>
+          <div class="header-controls">
+            <label class="dataset-select">
+              HSK set
+              <select id="datasetSelect"></select>
+            </label>
+            <label class="dataset-select">
+              UI
+              <select id="uiLanguage">
+                <option value="ru">RU</option>
+                <option value="en">EN</option>
+              </select>
+            </label>
+          </div>
         </div>
 
-        <div class="toolbar">
-          <button id="loadSampleBtn" title="Reload selected HSK set">Reload set</button>
-          <button id="loadOriginalBtn" title="Reload selected HSK set without saved edits">Load original</button>
-          <button id="importJsonBtn">Import JSON</button>
-          <button id="importCsvBtn">Import CSV</button>
-          <button id="enrichBtn">Enrich</button>
-          <button id="regenerateBtn" title="Recalculate layout and redraw all plates from current table values">Regenerate all</button>
-          <button id="saveCorrectionsBtn" title="Save edited fields for this HSK set">Save edits</button>
-          <button id="exportCorrectionsBtn" title="Download saved edits as JSON">Export edits</button>
-          <button id="importCorrectionsBtn" title="Import saved HSK edits JSON">Import edits</button>
-          <button id="clearCorrectionsBtn" title="Remove saved edits for this HSK set">Clear edits</button>
-          <input id="fileInput" type="file" accept=".json,.csv,.txt" hidden />
-        </div>
-        <p id="correctionsStatus" class="corrections-status"></p>
+        <details class="module" data-module-id="project" open>
+          <summary><span>Project</span></summary>
+          <div class="module-body">
+            <div class="toolbar">
+              <button id="loadSampleBtn" title="Reload selected HSK set">Reload set</button>
+              <button id="loadOriginalBtn" title="Reload selected HSK set without saved edits">Load original</button>
+              <button id="importJsonBtn">Import JSON</button>
+              <button id="importCsvBtn">Import CSV</button>
+              <button id="enrichBtn">Enrich</button>
+              <button id="regenerateBtn" title="Recalculate layout and redraw all plates from current table values">Regenerate all</button>
+              <button id="saveCorrectionsBtn" title="Save edited fields for this HSK set">Save edits</button>
+              <button id="exportCorrectionsBtn" title="Download saved edits as JSON">Export edits</button>
+              <button id="importCorrectionsBtn" title="Import saved HSK edits JSON">Import edits</button>
+              <button id="clearCorrectionsBtn" title="Remove saved edits for this HSK set">Clear edits</button>
+              <input id="fileInput" type="file" accept=".json,.csv,.txt" hidden />
+            </div>
+            <p id="correctionsStatus" class="corrections-status"></p>
 
-        <div class="range-row">
-          <label>
-            Range start
-            <input id="rangeStart" type="range" min="1" max="150" value="1" />
-            <input id="rangeStartNumber" type="number" min="1" max="150" value="1" />
-          </label>
-          <label>
-            Range end
-            <input id="rangeEnd" type="range" min="1" max="150" value="50" />
-            <input id="rangeEndNumber" type="number" min="1" max="150" value="50" />
-          </label>
-        </div>
+            <div class="range-row">
+              <label>
+                Range start
+                <input id="rangeStart" type="range" min="1" max="150" value="1" />
+                <input id="rangeStartNumber" type="number" min="1" max="150" value="1" />
+              </label>
+              <label>
+                Range end
+                <input id="rangeEnd" type="range" min="1" max="150" value="50" />
+                <input id="rangeEndNumber" type="number" min="1" max="150" value="50" />
+              </label>
+            </div>
 
-        <div class="language-row">
-          <label>
-            Extra language
-            <select id="extraLanguagePreset">
-              <option value="hungarian" selected>Hungarian</option>
-              <option value="german">German</option>
-              <option value="spanish">Spanish</option>
-              <option value="french">French</option>
-              <option value="custom">Custom</option>
-            </select>
-          </label>
-          <label>
-            Label
-            <input id="extraLanguageLabel" type="text" value="Hungarian" />
-          </label>
-        </div>
+            <div class="language-row">
+              <label>
+                Extra language
+                <select id="extraLanguagePreset">
+                  <option value="hungarian" selected>Hungarian</option>
+                  <option value="german">German</option>
+                  <option value="spanish">Spanish</option>
+                  <option value="french">French</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </label>
+              <label>
+                Label
+                <input id="extraLanguageLabel" type="text" value="Hungarian" />
+              </label>
+            </div>
+          </div>
+        </details>
 
-        <div class="table-wrap">
-          <table id="wordTable">
-            <thead>
-              <tr></tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
+        <details class="module game-engine" data-module-id="game-engine" open>
+          <summary><span>Game Engine</span></summary>
+          <div class="module-body">
+            <div class="settings-grid">
+              <label>
+                Mode
+                <select id="gameMode">
+                  <option value="flashcards" selected>Flashcards</option>
+                  <option value="domino">Domino playable core</option>
+                  <option value="matching">Matching</option>
+                  <option value="memory">Memory</option>
+                  <option value="pair_cards">Pair cards</option>
+                  <option value="modular_expansion">Modular expansion</option>
+                  <option value="mixed_challenge">Mixed challenge</option>
+                </select>
+              </label>
+              <label>
+                Rules language
+                <select id="rulesLanguage">
+                  <option value="ru" selected>Russian</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+              <label>
+                Deck density
+                <select id="dominoDensity">
+                  <option value="compact" selected>Compact deck</option>
+                  <option value="target_count">Target count</option>
+                  <option value="complete_cycle">Complete cycle</option>
+                </select>
+              </label>
+              <label>
+                Normal tiles
+                <select id="dominoNormalMode">
+                  <option value="sequential" selected>Sequential bridges</option>
+                </select>
+              </label>
+              <label>Target tiles <input id="targetTileCount" type="number" value="30" min="1" step="1" /></label>
+              <label class="checkbox-row"><input id="dominoCircular" type="checkbox" checked /> Circular chain</label>
+              <label class="checkbox-row"><input id="includeRules" type="checkbox" checked /> Include game rules</label>
+              <label class="checkbox-row"><input id="simulatorEnabled" type="checkbox" checked /> Simulator</label>
+              <label>Players <input id="playerCount" type="number" value="2" min="1" step="1" /></label>
+              <label>Hand size <input id="handSize" type="number" value="5" min="1" step="1" /></label>
+              <label>Seed <input id="simSeed" type="number" value="1" step="1" /></label>
+            </div>
+            <label class="language-order-label">
+              Language order
+              <input id="languageOrder" type="text" value="chinese,pinyin,english,target,hungarian" />
+            </label>
+            <p class="hint">Domino example: doubles like [你 | nǐ] branch, normal bridges continue the chain.</p>
+          </div>
+        </details>
+
+        <details class="module" data-module-id="word-table" open>
+          <summary><span>Vocabulary table</span></summary>
+          <div class="module-body">
+            <div class="recommendation-controls settings-grid">
+              <label>English max chars <input id="englishMaxChars" type="number" value="18" min="4" step="1" /></label>
+              <label>Russian max chars <input id="targetMaxChars" type="number" value="18" min="4" step="1" /></label>
+              <label>Extra max chars <input id="hungarianMaxChars" type="number" value="18" min="4" step="1" /></label>
+              <button id="applyRecommendationsBtn" type="button">Apply recommendations</button>
+            </div>
+            <p class="hint" id="recommendationHint">Recommended text is used for cards. Manual edits are preserved when max length changes.</p>
+            <div class="table-wrap">
+              <table id="wordTable">
+                <thead>
+                  <tr></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </details>
       </section>
 
       <section class="preview-column">
@@ -88,66 +167,140 @@
           </div>
         </div>
         <div id="warnings" class="warnings"></div>
+        <section class="simulator-panel">
+          <div class="language-title">
+            <h2 id="simulatorTitle">Simulator</h2>
+            <button id="rulesHelpBtn" type="button">?</button>
+          </div>
+          <div id="simulatorView" class="simulator-view"></div>
+        </section>
         <div id="plates" class="plates"></div>
       </section>
 
       <section class="panel settings-panel">
         <h2>Settings</h2>
-        <div class="preset-tools">
-          <label>
-            Preset
-            <select id="presetSelect"></select>
-          </label>
-          <label>
-            Name
-            <input id="presetName" type="text" value="My preset" />
-          </label>
-          <button id="loadPresetBtn">Load</button>
-          <button id="savePresetBtn">Save</button>
-          <button id="deletePresetBtn">Delete</button>
-        </div>
-        <div class="settings-grid">
-          <label>Plate W <input id="plateWidth" type="number" value="180" step="0.1" /></label>
-          <label>Plate D <input id="plateDepth" type="number" value="180" step="0.1" /></label>
-          <label>Margin <input id="plateMargin" type="number" value="0" step="0.1" /></label>
-          <label>Card W <input id="cardWidth" type="number" value="30" step="0.1" /></label>
-          <label>Card H <input id="cardHeight" type="number" value="30" step="0.1" /></label>
-          <label>Thickness <input id="thickness" type="number" value="2" step="0.1" /></label>
-          <label>Corner R <input id="cornerRadius" type="number" value="3" min="0" step="0.1" /></label>
-          <label>Gap <input id="gap" type="number" value="2.8" step="0.1" /></label>
-          <label>Rows <input id="rows" type="text" value="auto" /></label>
-          <label>Columns <input id="columns" type="text" value="auto" /></label>
-          <label>Border W <input id="borderWidth" type="number" value="1" step="0.1" /></label>
-          <label>Border H <input id="borderHeight" type="number" value="0.45" step="0.05" /></label>
-          <label>Text H <input id="textHeight" type="number" value="0.55" step="0.05" /></label>
-          <label>Back depth <input id="backDepth" type="number" value="0.4" step="0.05" /></label>
-          <label>Chinese scale <input id="chineseTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
-          <label>Pinyin scale <input id="pinyinTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
-          <label>English scale <input id="englishTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
-          <label>Russian scale <input id="targetTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
-          <label>Hungarian scale <input id="hungarianTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
-          <label>Hanzi guide scale <input id="hanziGuideScale" type="range" min="0.5" max="1.8" value="1" step="0.05" /></label>
-          <label>
-            Hanzi guide
-            <select id="hanziGuide">
-              <option value="none">None</option>
-              <option value="tian_4" selected>4-part</option>
-              <option value="mi_8">8-part</option>
-            </select>
-          </label>
-          <label>
-            Back number
-            <select id="backMode">
-              <option value="deboss" selected>Deboss</option>
-              <option value="deboss_colored">Deboss + color</option>
-            </select>
-          </label>
-        </div>
+        <details class="module" data-module-id="presets" open>
+          <summary><span>Presets</span></summary>
+          <div class="module-body preset-tools">
+            <label>
+              Preset
+              <select id="presetSelect"></select>
+            </label>
+            <label>
+              Name
+              <input id="presetName" type="text" value="My preset" />
+            </label>
+            <button id="loadPresetBtn">Load</button>
+            <button id="savePresetBtn">Save</button>
+            <button id="deletePresetBtn">Delete</button>
+          </div>
+        </details>
+
+        <details class="module" data-module-id="printer-card" open>
+          <summary><span>Printer and card</span></summary>
+          <div class="module-body settings-grid">
+            <label>Plate W <input id="plateWidth" type="number" value="180" step="0.1" /></label>
+            <label>Plate D <input id="plateDepth" type="number" value="180" step="0.1" /></label>
+            <label>Margin <input id="plateMargin" type="number" value="0" step="0.1" /></label>
+            <label>Card W <input id="cardWidth" type="number" value="30" step="0.1" /></label>
+            <label>Card H <input id="cardHeight" type="number" value="30" step="0.1" /></label>
+            <label>Thickness <input id="thickness" type="number" value="2" step="0.1" /></label>
+            <label>Corner R <input id="cornerRadius" type="number" value="3" min="0" step="0.1" /></label>
+            <label>Gap <input id="gap" type="number" value="2.8" step="0.1" /></label>
+            <label>Rows <input id="rows" type="text" value="auto" /></label>
+            <label>Columns <input id="columns" type="text" value="auto" /></label>
+          </div>
+        </details>
+
+        <details class="module" data-module-id="geometry-text" open>
+          <summary><span>Text and geometry</span></summary>
+          <div class="module-body settings-grid">
+            <label>Border W <input id="borderWidth" type="number" value="1" step="0.1" /></label>
+            <label>Border H <input id="borderHeight" type="number" value="0.45" step="0.05" /></label>
+            <label>Text H <input id="textHeight" type="number" value="0.55" step="0.05" /></label>
+            <label>Back depth <input id="backDepth" type="number" value="0.4" step="0.05" /></label>
+            <label>Chinese scale <input id="chineseTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
+            <label>Pinyin scale <input id="pinyinTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
+            <label>English scale <input id="englishTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
+            <label>Russian scale <input id="targetTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
+            <label>Hungarian scale <input id="hungarianTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
+            <label>Hanzi guide scale <input id="hanziGuideScale" type="range" min="0.5" max="1.8" value="1" step="0.05" /></label>
+            <label>
+              Hanzi guide
+              <select id="hanziGuide">
+                <option value="none">None</option>
+                <option value="tian_4" selected>4-part</option>
+                <option value="mi_8">8-part</option>
+              </select>
+            </label>
+            <label>
+              Text fit
+              <select id="textFitMode">
+                <option value="auto_max" selected>Auto max</option>
+                <option value="manual">Manual</option>
+              </select>
+            </label>
+          </div>
+        </details>
+
+        <details class="module" data-module-id="export-print" open>
+          <summary><span>Export and print</span></summary>
+          <div class="module-body settings-grid">
+            <label>
+              Back number
+              <select id="backMode">
+                <option value="deboss" selected>Deboss</option>
+                <option value="deboss_colored">Deboss + color</option>
+              </select>
+            </label>
+            <label>
+              Plate label
+              <select id="plateLabelMode">
+                <option value="none">None</option>
+                <option value="visible">Visible</option>
+              </select>
+            </label>
+            <label>Label H <input id="plateLabelHeight" type="number" value="0.28" min="0.05" step="0.05" /></label>
+            <label>Layer H <input id="layerHeight" type="number" value="0.16" min="0.08" step="0.02" /></label>
+            <label>Nozzle <input id="nozzle" type="number" value="0.4" min="0.2" step="0.05" /></label>
+            <label class="checkbox-row"><input id="materialSaver" type="checkbox" checked /> Material saver</label>
+          </div>
+        </details>
+
+        <details class="module" data-module-id="colors">
+          <summary><span>Tile colors</span></summary>
+          <div class="module-body settings-grid">
+            <label>Base <input id="colorBase" type="color" value="#ffffff" /></label>
+            <label>Text <input id="colorText" type="color" value="#111111" /></label>
+            <label>Border <input id="colorBorder" type="color" value="#f2b600" /></label>
+            <label>Divider <input id="colorDivider" type="color" value="#f2b600" /></label>
+            <label>Double <input id="colorDoubleMarker" type="color" value="#d9a000" /></label>
+            <label>Hanzi <input id="colorHanziGuide" type="color" value="#dd3b2a" /></label>
+          </div>
+        </details>
 
         <button id="exportBtn" class="primary">Export ZIP</button>
         <pre id="exportResult" class="export-result"></pre>
       </section>
     </main>
+    <div id="cardInspector" class="modal" hidden>
+      <div class="modal-panel">
+        <div class="modal-header">
+          <h2 id="inspectorTitle">Card inspector</h2>
+          <button id="closeInspectorBtn" type="button">Close</button>
+        </div>
+        <div id="inspectorBody" class="inspector-body"></div>
+      </div>
+    </div>
+    <div id="helpModal" class="modal" hidden>
+      <div class="modal-panel help-panel">
+        <div class="modal-header">
+          <h2 id="helpTitle">Help</h2>
+          <button id="closeHelpBtn" type="button">Close</button>
+        </div>
+        <div id="helpBody" class="help-body"></div>
+      </div>
+    </div>
     <script src="/app.js"></script>
   </body>
 </html>

@@ -54,23 +54,27 @@ def used_area(rows: int, columns: int, design: CardDesign) -> tuple[float, float
 
 
 def compute_layout(words: list[WordEntry], printer: PrinterProfile, design: CardDesign) -> dict[str, Any]:
+    return compute_index_layout([word.index for word in words], printer, design, words)
+
+
+def compute_index_layout(indices: list[int], printer: PrinterProfile, design: CardDesign, words_for_warnings: list[WordEntry] | None = None) -> dict[str, Any]:
     rows, columns = resolve_grid(printer, design)
     used_w, used_d = used_area(rows, columns, design)
     capacity = max(1, rows * columns)
-    pages = max(1, math.ceil(len(words) / capacity))
+    pages = max(1, math.ceil(len(indices) / capacity))
 
     origin_x = printer.marginMm + max(0.0, (printer.widthMm - printer.marginMm * 2 - used_w) / 2)
     origin_y = printer.marginMm + max(0.0, (printer.depthMm - printer.marginMm * 2 - used_d) / 2)
 
     positions: list[CardPosition] = []
-    for offset, word in enumerate(words):
+    for offset, index in enumerate(indices):
         page = offset // capacity
         local = offset % capacity
         row = local // columns
         column = local % columns
         positions.append(
             CardPosition(
-                index=word.index,
+                index=index,
                 page=page,
                 row=row,
                 column=column,
@@ -81,7 +85,17 @@ def compute_layout(words: list[WordEntry], printer: PrinterProfile, design: Card
             )
         )
 
+    words = words_for_warnings or []
     warnings = validate_layout(words, printer, design, rows, columns, used_w, used_d, capacity)
+    if len(indices) > capacity:
+        warnings = [warning for warning in warnings if warning["code"] != "page_split"]
+        warnings.append(
+            {
+                "severity": "info",
+                "code": "page_split",
+                "message": f"{len(indices)} cards split across {math.ceil(len(indices) / capacity)} physical pages at {capacity} cards/page.",
+            }
+        )
     return {
         "rows": rows,
         "columns": columns,
