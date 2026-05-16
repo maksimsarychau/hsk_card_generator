@@ -70,8 +70,8 @@ def _fit_lines(text: str, language: str, width_px: int, height_px: int) -> tuple
     if language == "chinese":
         return [text], max(12, int(height_px * (0.68 if len(text) <= 1 else 0.5)))
     max_lines = 2 if language == "pinyin" else 3
-    start_size = int(height_px * (0.32 if language == "pinyin" else 0.25))
-    min_size = max(8, int(height_px * 0.12))
+    start_size = int(height_px * (0.42 if language == "pinyin" else 0.34))
+    min_size = max(10, int(height_px * (0.16 if language == "pinyin" else 0.14)))
     for font_px in range(start_size, min_size - 1, -1):
         lines = _wrap_text(text, width_px, font_px, max_lines)
         if len(lines) * font_px * 1.18 <= height_px and max(_estimate_width(line, font_px) for line in lines) <= width_px:

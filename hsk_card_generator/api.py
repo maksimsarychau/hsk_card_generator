@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from hsk_card_generator.data import enrich_words, get_dataset, get_dataset_list, get_hsk1_sample
+from hsk_card_generator.domino import build_game_plan, build_game_tiles
 from hsk_card_generator.exporter import export_zip
-from hsk_card_generator.layout import compute_layout
-from hsk_card_generator.models import CardDesign, ExportRequest, PrinterProfile, WordEntry
+from hsk_card_generator.layout import compute_index_layout, compute_layout
+from hsk_card_generator.models import CardDesign, DominoSettings, ExportRequest, PrinterProfile, SimulatorSettings, WordEntry
 
 
 def _words_from_payload(payload: dict) -> list[WordEntry]:
@@ -20,10 +21,43 @@ def handle_preview(payload: dict) -> dict:
     words = _words_from_payload(payload)
     printer = PrinterProfile.from_dict(payload.get("printer"))
     design = CardDesign.from_dict(payload.get("design"))
-    layout = compute_layout(words, printer, design)
+    game_mode = payload.get("gameMode") or "flashcards"
+    domino = DominoSettings.from_dict(payload.get("domino"))
+    tiles = build_game_tiles(words, game_mode, domino)
+    game_plan = build_game_plan(words, game_mode, domino, SimulatorSettings.from_dict(payload.get("simulator")))
+    if game_mode in {"matching", "memory"}:
+        cards = game_plan.get("cards") or []
+        layout = compute_index_layout([card["cardId"] for card in cards], printer, design)
+        layout["gameMode"] = game_mode
+        layout["cards"] = cards
+        layout["gameCards"] = True
+        layout["cardCount"] = len(cards)
+    elif tiles:
+        layout = compute_index_layout([tile.cardId for tile in tiles], printer, design)
+        layout["gameMode"] = game_mode
+        layout["cards"] = [tile.to_dict() for tile in tiles]
+        layout["tileCount"] = len(tiles)
+    else:
+        layout = compute_layout(words, printer, design)
+        layout["gameMode"] = game_mode
+        layout["cards"] = [word.to_dict() for word in words]
+    layout["dimensions"] = {
+        "baseThicknessMm": design.thicknessMm,
+        "raisedTextHeightMm": design.textHeightMm,
+        "raisedBorderHeightMm": design.borderHeightMm,
+        "totalModelHeightMm": round(design.thicknessMm + max(design.textHeightMm, design.borderHeightMm), 4),
+    }
+    if design.textHeightMm + design.borderHeightMm > design.thicknessMm * 0.75:
+        layout["warnings"].append(
+            {
+                "severity": "warning",
+                "code": "raised_features_tall",
+                "message": "Raised text/border are large relative to base thickness; Bambu may show a much taller total model height.",
+            }
+        )
+    layout["gamePlan"] = game_plan
     languages = payload.get("languages") or ["chinese", "pinyin", "english", "target", "hungarian"]
     layout["languages"] = languages
-    layout["cards"] = [word.to_dict() for word in words]
     return {"ok": True, "layout": layout}
 
 

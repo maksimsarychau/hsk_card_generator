@@ -147,6 +147,15 @@ class ExporterTests(unittest.TestCase):
         self.assertIn(round(design.backNumberDepthMm, 6), zs)
         self.assertIn(round(design.thicknessMm, 6), zs)
 
+    def test_flashcard_base_thickness_changes_geometry_bounds(self) -> None:
+        heights = []
+        for thickness in (1.4, 3.2):
+            design = CardDesign(thicknessMm=thickness)
+            pos = CardPosition(1, 0, 0, 0, 0, 0, design.widthMm, design.heightMm)
+            base = next(part for part in build_card_parts(HSK1_SAMPLE[0], "chinese", pos, design) if part.role == "base")
+            heights.append(max(z for _, _, z in base.mesh.vertices))
+        self.assertEqual(heights, [1.4, 3.2])
+
     def test_colored_back_number_keeps_digit_order_and_flips_vertically(self) -> None:
         design = CardDesign(backNumberMode="deboss_colored")
         pos = CardPosition(12, 0, 0, 0, 0, 0, design.widthMm, design.heightMm)

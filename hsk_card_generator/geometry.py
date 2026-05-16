@@ -18,6 +18,9 @@ ROLE_COLORS: dict[str, str] = {
     "backNumber": "#777777",
     "border": "#f2b600",
     "hanziGuide": "#dd3b2a",
+    "divider": "#f2b600",
+    "doubleMarker": "#d9a000",
+    "plateLabel": "#444444",
 }
 
 
@@ -45,7 +48,7 @@ class Part:
     name: str
     role: str
     mesh: Mesh
-    language: Language
+    language: str
     page: int
     card_index: int | None = None
 
@@ -229,8 +232,51 @@ def build_card_parts(
     return parts
 
 
+def build_game_card_parts(
+    card_id: int,
+    back_id: int,
+    language: str,
+    text: str,
+    deck_name: str,
+    position: CardPosition,
+    design: CardDesign,
+) -> list[Part]:
+    x, y = position.x, position.y
+    w, h = position.width, position.height
+    t = design.thicknessMm
+    surface_z = max(0, t - SURFACE_EMBED_MM)
+    text_value = str(text or "?").strip() or "?"
+    text_meshes = _text_value_meshes(f"{deck_name}_{card_id:03d}_{language}", text_value, language, x + w * 0.1, y + h * 0.15, w * 0.8, h * 0.7, surface_z, design)
+    role_meshes: dict[str, list[Mesh]] = {
+        "base": _base_meshes(back_id, x, y, w, h, t, design),
+        "border": _border_meshes(card_id, x, y, surface_z, w, h, design),
+        "frontText": text_meshes,
+        "hanziGuide": _hanzi_guide_meshes(card_id, language, x, y, surface_z, w, h, design, text_value),
+    }
+    parts: list[Part] = []
+    for role, meshes in role_meshes.items():
+        if not meshes:
+            continue
+        mesh = merge_meshes(f"{deck_name}_{card_id:03d}_{role}", meshes)
+        parts.append(Part(mesh.name, role, mesh, deck_name, position.page, card_id))
+    return parts
+
+
 def _base_meshes(index: int, x: float, y: float, w: float, h: float, thickness: float, design: CardDesign) -> list[Mesh]:
     slots = _back_number_rects(index, x, y, w, h, design)
+    return _base_meshes_from_slots(index, x, y, w, h, thickness, design, slots)
+
+
+def _base_meshes_from_slots(
+    index: int,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    thickness: float,
+    design: CardDesign,
+    slots: list[tuple[float, float, float, float]],
+) -> list[Mesh]:
     recess_depth = min(max(0.05, design.backNumberDepthMm), max(0.05, thickness - 0.05))
     radius = _corner_radius(design, w, h)
     if not slots or recess_depth <= 0:
@@ -301,6 +347,122 @@ def _base_meshes(index: int, x: float, y: float, w: float, h: float, thickness: 
                 )
             )
     return meshes
+
+
+def build_domino_tile_parts(tile, position: CardPosition, design: CardDesign) -> list[Part]:
+    x, y = position.x, position.y
+    w, h = position.width, position.height
+    t = design.thicknessMm
+    surface_z = max(0, t - SURFACE_EMBED_MM)
+    half_gap = max(0.35, design.borderWidthMm * 0.45)
+    half_w = (w - half_gap) / 2
+    left_box = (x + design.borderWidthMm * 1.0, y + h * 0.13, half_w - design.borderWidthMm * 1.55, h * 0.74)
+    right_box = (x + half_w + half_gap + design.borderWidthMm * 0.55, y + h * 0.13, half_w - design.borderWidthMm * 1.55, h * 0.74)
+    slots = _domino_back_number_rects(tile, x, y, w, h, design)
+    role_meshes: dict[str, list[Mesh]] = {
+        "base": _base_meshes_from_slots(tile.cardId, x, y, w, h, t, design, slots),
+        "border": _border_meshes(tile.cardId, x, y, surface_z, w, h, design),
+        "divider": _divider_meshes(tile, x, y, surface_z, w, h, design),
+        "frontText": [
+            *_text_value_meshes(f"domino_{tile.cardId:03d}_left", tile.left.text, tile.left.languageCode, *left_box, surface_z, design),
+            *_text_value_meshes(f"domino_{tile.cardId:03d}_right", tile.right.text, tile.right.languageCode, *right_box, surface_z, design),
+        ],
+        "backNumber": _domino_back_number_meshes(tile, x, y, w, h, design) if design.backNumberMode == "deboss_colored" else [],
+        "doubleMarker": _double_marker_meshes(tile, x, y, surface_z, w, h, design) if tile.tileType == "double" else [],
+    }
+    parts: list[Part] = []
+    for role, meshes in role_meshes.items():
+        if not meshes:
+            continue
+        mesh = merge_meshes(f"domino_{tile.cardId:03d}_{role}", meshes)
+        parts.append(Part(mesh.name, role, mesh, "domino", position.page, tile.cardId))
+    return parts
+
+
+def build_plate_label_part(text: str, language: str, page: int, x: float, y: float, z: float, width: float, height: float, label_height: float) -> Part | None:
+    if not text.strip() or width <= 0 or height <= 0:
+        return None
+    design = CardDesign(widthMm=width, heightMm=height, textHeightMm=label_height, hanziGuideMode="none")
+    meshes = _text_value_meshes(f"{language}_page_{page + 1:02d}_plate_label", text, "english", x, y, width, height, z, design)
+    if not meshes:
+        return None
+    mesh = merge_meshes(f"{language}_page_{page + 1:02d}_plateLabel", meshes)
+    return Part(mesh.name, "plateLabel", mesh, language, page)
+
+
+def _text_value_meshes(
+    name: str,
+    text: str,
+    language: str,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    z: float,
+    design: CardDesign,
+) -> list[Mesh]:
+    text = str(text or "?").strip() or "?"
+    px = CHINESE_RASTER_PX if language == "chinese" else 128
+    py = CHINESE_RASTER_PX if language == "chinese" else 96
+    runs = text_runs(text, language, px, py)
+    if not runs:
+        fake = WordEntry(1, text if language == "chinese" else "", text if language == "pinyin" else "", text if language == "english" else "", text if language == "target" else "", text if language == "hungarian" else "")
+        return _fallback_text_proxy(fake, language, x, y, z, w, h, design)
+    min_rx = min(rx for rx, _, _, _ in runs)
+    max_rx = max(rx + rw for rx, _, rw, _ in runs)
+    min_ry = min(ry for _, ry, _, _ in runs)
+    max_ry = max(ry + rh for _, ry, _, rh in runs)
+    text_scale = _text_scale(language, design)
+    scale = min(w / max(1, max_rx - min_rx), h / max(1, max_ry - min_ry)) * text_scale
+    scale_x = scale
+    scale_y = scale
+    ink_w = (max_rx - min_rx) * scale
+    ink_h = (max_ry - min_ry) * scale
+    offset_x = x + (w - ink_w) / 2
+    offset_y = y + (h - ink_h) / 2
+    meshes: list[Mesh] = []
+    for i, (rx, ry, rw, rh) in enumerate(runs):
+        block_w = max(0.03, rw * scale_x)
+        block_h = max(0.03, rh * scale_y)
+        meshes.append(
+            cuboid(
+                f"{name}_text_{i:04d}",
+                offset_x + (rx - min_rx) * scale_x,
+                offset_y + ink_h - ((ry - min_ry) * scale_y) - block_h,
+                z,
+                block_w,
+                block_h,
+                _raised_height(design.textHeightMm),
+            )
+        )
+    return meshes
+
+
+def _divider_meshes(tile, x: float, y: float, z: float, w: float, h: float, design: CardDesign) -> list[Mesh]:
+    divider_w = max(0.45, design.borderWidthMm * (1.1 if tile.tileType == "double" else 0.7))
+    height = _raised_height(design.borderHeightMm)
+    return [cuboid(f"domino_{tile.cardId:03d}_divider", x + w / 2 - divider_w / 2, y + design.borderWidthMm * 1.2, z, divider_w, h - design.borderWidthMm * 2.4, height)]
+
+
+def _double_marker_meshes(tile, x: float, y: float, z: float, w: float, h: float, design: CardDesign) -> list[Mesh]:
+    marker_w = max(1.2, min(w, h) * 0.08)
+    height = _raised_height(design.borderHeightMm * 1.1)
+    return [
+        cuboid(f"domino_{tile.cardId:03d}_double_marker_h", x + w / 2 - marker_w * 1.2, y + h / 2 - marker_w / 2, z, marker_w * 2.4, marker_w, height),
+        cuboid(f"domino_{tile.cardId:03d}_double_marker_v", x + w / 2 - marker_w / 2, y + h / 2 - marker_w * 1.2, z, marker_w, marker_w * 2.4, height),
+    ]
+
+
+def _domino_back_number_rects(tile, x: float, y: float, w: float, h: float, design: CardDesign) -> list[tuple[float, float, float, float]]:
+    half_w = w / 2
+    left = _back_number_rects(tile.backIds[0], x, y, half_w, h, design)
+    right = _back_number_rects(tile.backIds[1], x + half_w, y, half_w, h, design)
+    return left + right
+
+
+def _domino_back_number_meshes(tile, x: float, y: float, w: float, h: float, design: CardDesign) -> list[Mesh]:
+    insert_height = max(0.05, design.backNumberDepthMm)
+    return [cuboid(f"domino_back_{tile.cardId:03d}_{i:02d}", sx, sy, 0, sw, sd, insert_height) for i, (sx, sy, sw, sd) in enumerate(_domino_back_number_rects(tile, x, y, w, h, design))]
 
 
 def _border_meshes(index: int, x: float, y: float, z: float, w: float, h: float, design: CardDesign) -> list[Mesh]:

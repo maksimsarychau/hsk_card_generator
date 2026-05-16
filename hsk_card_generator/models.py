@@ -9,6 +9,10 @@ LockedField = Literal["pinyin", "english", "target", "hungarian"]
 HanziGuideMode = Literal["none", "tian_4", "mi_8"]
 BackNumberMode = Literal["deboss", "deboss_colored"]
 RowsColumns = int | Literal["auto"]
+GameMode = Literal["flashcards", "matching", "memory", "pair_cards", "domino", "modular_expansion", "mixed_challenge"]
+DominoDensity = Literal["compact", "target_count", "complete_cycle"]
+DominoNormalMode = Literal["sequential"]
+DominoRulesMode = Literal["training", "game", "chaos"]
 
 
 @dataclass
@@ -140,6 +144,125 @@ class CardDesign:
 
 
 @dataclass
+class DominoSettings:
+    density: DominoDensity = "compact"
+    normalMode: DominoNormalMode = "sequential"
+    doublesBehavior: str = "branch"
+    circular: bool = True
+    targetTileCount: int = 30
+    languageOrder: list[str] = field(default_factory=lambda: ["chinese", "pinyin", "english", "target", "hungarian"])
+    rulesMode: DominoRulesMode = "training"
+    includeRules: bool = True
+    rulesLanguage: str = "ru"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "DominoSettings":
+        data = data or {}
+        target = data.get("targetTileCount")
+        try:
+            target_count = max(1, int(target))
+        except (TypeError, ValueError):
+            target_count = 30
+        language_order = [str(item) for item in data.get("languageOrder") or ["chinese", "pinyin", "english", "target", "hungarian"]]
+        return cls(
+            density=data.get("density") or "compact",
+            normalMode=data.get("normalMode") or "sequential",
+            doublesBehavior=data.get("doublesBehavior") or "branch",
+            circular=bool(data.get("circular", True)),
+            targetTileCount=target_count,
+            languageOrder=language_order,
+            rulesMode=data.get("rulesMode") or "training",
+            includeRules=bool(data.get("includeRules", True)),
+            rulesLanguage=str(data.get("rulesLanguage") or "ru"),
+        )
+
+
+@dataclass
+class PlateLabelSettings:
+    mode: Literal["none", "visible"] = "none"
+    textTemplate: str = "{dataset} {range} {mode} p{page}"
+    heightMm: float = 0.28
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "PlateLabelSettings":
+        data = data or {}
+        value = data.get("heightMm")
+        try:
+            height = max(0.05, float(value))
+        except (TypeError, ValueError):
+            height = 0.28
+        return cls(
+            mode="visible" if data.get("mode") == "visible" else "none",
+            textTemplate=str(data.get("textTemplate") or "{dataset} {range} {mode} p{page}"),
+            heightMm=height,
+        )
+
+
+@dataclass
+class PrintProfileSettings:
+    target: str = "bambu_a1_mini"
+    layerHeightMm: float = 0.16
+    nozzleMm: float = 0.4
+    materialSaver: bool = True
+    includeBambuMetadata: bool = True
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "PrintProfileSettings":
+        data = data or {}
+
+        def number(key: str, default: float) -> float:
+            value = data.get(key)
+            try:
+                return default if value is None or value == "" else float(value)
+            except (TypeError, ValueError):
+                return default
+
+        return cls(
+            target=str(data.get("target") or "bambu_a1_mini"),
+            layerHeightMm=number("layerHeightMm", 0.16),
+            nozzleMm=number("nozzleMm", 0.4),
+            materialSaver=bool(data.get("materialSaver", True)),
+            includeBambuMetadata=bool(data.get("includeBambuMetadata", True)),
+        )
+
+
+@dataclass
+class TextFitSettings:
+    mode: Literal["auto_max", "manual"] = "auto_max"
+    minReadableMm: float = 3.0
+    maxLines: int = 3
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "TextFitSettings":
+        data = data or {}
+        return cls(
+            mode="manual" if data.get("mode") == "manual" else "auto_max",
+            minReadableMm=float(data.get("minReadableMm") or 3.0),
+            maxLines=max(1, int(data.get("maxLines") or 3)),
+        )
+
+
+@dataclass
+class SimulatorSettings:
+    enabled: bool = True
+    playerCount: int = 2
+    handSize: int = 5
+    seed: int = 1
+    drawPile: bool = True
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "SimulatorSettings":
+        data = data or {}
+        return cls(
+            enabled=bool(data.get("enabled", True)),
+            playerCount=max(1, int(data.get("playerCount") or 2)),
+            handSize=max(1, int(data.get("handSize") or 5)),
+            seed=int(data.get("seed") or 1),
+            drawPile=bool(data.get("drawPile", True)),
+        )
+
+
+@dataclass
 class ExportRequest:
     words: list[WordEntry]
     languages: list[Language]
@@ -148,11 +271,23 @@ class ExportRequest:
     printer: PrinterProfile
     design: CardDesign
     formats: list[str]
+    gameMode: GameMode = "flashcards"
+    domino: DominoSettings = field(default_factory=DominoSettings)
+    colors: dict[str, str] = field(default_factory=dict)
+    datasetId: str = "custom"
+    plateLabel: PlateLabelSettings = field(default_factory=PlateLabelSettings)
+    printProfile: PrintProfileSettings = field(default_factory=PrintProfileSettings)
+    textFit: TextFitSettings = field(default_factory=TextFitSettings)
+    simulator: SimulatorSettings = field(default_factory=SimulatorSettings)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ExportRequest":
         raw_words = data.get("words") or []
         words = [WordEntry.from_dict(item, i + 1) for i, item in enumerate(raw_words)]
+        game_mode = data.get("gameMode") or "flashcards"
+        plate_label = PlateLabelSettings.from_dict(data.get("plateLabel"))
+        if data.get("plateLabel") is None and game_mode != "flashcards":
+            plate_label.mode = "visible"
         return cls(
             words=words,
             languages=list(data.get("languages") or ["chinese", "pinyin", "english", "target", "hungarian"]),
@@ -161,4 +296,12 @@ class ExportRequest:
             printer=PrinterProfile.from_dict(data.get("printer")),
             design=CardDesign.from_dict(data.get("design")),
             formats=list(data.get("formats") or ["stl", "3mf", "zip"]),
+            gameMode=game_mode,
+            domino=DominoSettings.from_dict(data.get("domino")),
+            colors=dict(data.get("colors") or {}),
+            datasetId=str(data.get("datasetId") or "custom"),
+            plateLabel=plate_label,
+            printProfile=PrintProfileSettings.from_dict(data.get("printProfile")),
+            textFit=TextFitSettings.from_dict(data.get("textFit")),
+            simulator=SimulatorSettings.from_dict(data.get("simulator")),
         )
