@@ -27,23 +27,23 @@ class BITMAPINFO(ctypes.Structure):
     _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", wintypes.DWORD * 3)]
 
 
-def text_runs(text: str, language: str, width_px: int, height_px: int) -> list[tuple[int, int, int, int]]:
-    pillow_runs = _pillow_text_runs(text, language, width_px, height_px)
+def text_runs(text: str, language: str, width_px: int, height_px: int, max_lines: int | None = None) -> list[tuple[int, int, int, int]]:
+    pillow_runs = _pillow_text_runs(text, language, width_px, height_px, max_lines)
     if pillow_runs:
         return pillow_runs
     if platform.system() != "Windows":
         return []
-    lines, font_px = _fit_lines(text, language, width_px, height_px)
+    lines, font_px = _fit_lines(text, language, width_px, height_px, max_lines)
     return _render_lines_to_runs(tuple(lines), font_px, width_px, height_px, _font_for(language))
 
 
-def _pillow_text_runs(text: str, language: str, width_px: int, height_px: int) -> list[tuple[int, int, int, int]]:
+def _pillow_text_runs(text: str, language: str, width_px: int, height_px: int, max_lines: int | None = None) -> list[tuple[int, int, int, int]]:
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
         return []
 
-    lines, font_px = _fit_lines(text, language, width_px, height_px)
+    lines, font_px = _fit_lines(text, language, width_px, height_px, max_lines)
     font_path = _font_path_for(language)
     try:
         font = ImageFont.truetype(font_path, font_px) if font_path else ImageFont.load_default()
@@ -65,11 +65,13 @@ def _pillow_text_runs(text: str, language: str, width_px: int, height_px: int) -
     return _merge_vertical_runs(_image_to_row_runs(image, width_px, height_px))
 
 
-def _fit_lines(text: str, language: str, width_px: int, height_px: int) -> tuple[list[str], int]:
-    text = (text or "?").strip() or "?"
+def _fit_lines(text: str, language: str, width_px: int, height_px: int, max_lines_override: int | None = None) -> tuple[list[str], int]:
+    text = (text or "?").replace("\r\n", "\n").replace("\r", "\n").strip() or "?"
     if language == "chinese":
         return [text], max(12, int(height_px * (0.68 if len(text) <= 1 else 0.5)))
-    max_lines = 2 if language == "pinyin" else 3
+    default_max_lines = 2 if language == "pinyin" else 3
+    explicit_lines = max(1, text.count("\n") + 1)
+    max_lines = max(explicit_lines, max_lines_override or default_max_lines)
     start_size = int(height_px * (0.42 if language == "pinyin" else 0.34))
     min_size = max(10, int(height_px * (0.16 if language == "pinyin" else 0.14)))
     for font_px in range(start_size, min_size - 1, -1):
@@ -84,6 +86,13 @@ def _wrap_text(text: str, max_width: int, font_px: int, max_lines: int) -> list[
     lines: list[str] = []
     current = ""
     for token in tokens:
+        if token == "\n":
+            if current:
+                lines.append(current)
+                current = ""
+            elif lines:
+                lines.append("")
+            continue
         candidate = f"{current} {token}".strip()
         if not current or _estimate_width(candidate, font_px) <= max_width:
             current = candidate
@@ -101,7 +110,12 @@ def _wrap_text(text: str, max_width: int, font_px: int, max_lines: int) -> list[
 
 
 def _tokens(text: str) -> list[str]:
-    return text.replace("/", " / ").split()
+    tokens: list[str] = []
+    for line_index, line in enumerate(text.replace("/", " / ").split("\n")):
+        if line_index:
+            tokens.append("\n")
+        tokens.extend(line.split())
+    return tokens
 
 
 def _estimate_width(text: str, font_px: int) -> float:

@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import unittest
 import zipfile
+from io import BytesIO
 from pathlib import Path
 
 from hsk_card_generator.data import HSK1_SAMPLE
 from hsk_card_generator.exporter import build_3mf, build_3mf_assembly, build_3mf_single_object, export_zip
-from hsk_card_generator.geometry import build_card_parts
+from hsk_card_generator.geometry import _apply_line_char_limit, build_card_parts
 from hsk_card_generator.layout import CardPosition
-from hsk_card_generator.models import CardDesign, ExportRequest, PrinterProfile, WordEntry
+from hsk_card_generator.models import CardDesign, ExportRequest, PlateLabelSettings, PrinterProfile, WordEntry
 
 
 class ExporterTests(unittest.TestCase):
@@ -69,6 +70,36 @@ class ExporterTests(unittest.TestCase):
         self.assertAlmostEqual(left_center, expected_left, delta=0.35)
         self.assertAlmostEqual(right_center, expected_right, delta=0.35)
 
+    def test_raster_fine_multi_hanzi_stays_inside_cells(self) -> None:
+        design = CardDesign(textRenderMode="raster_fine")
+        pos = CardPosition(1, 0, 0, 0, 0, 0, design.widthMm, design.heightMm)
+        word = WordEntry(index=1, chinese="不客气")
+        parts = build_card_parts(word, "chinese", pos, design)
+        text = next(part for part in parts if part.role == "frontText")
+        xs = [x for x, _, _ in text.mesh.vertices]
+        ys = [y for _, y, _ in text.mesh.vertices]
+        self.assertGreater(min(xs), 1.5)
+        self.assertLess(max(xs), design.widthMm - 1.5)
+        self.assertGreater(min(ys), 6.0)
+        self.assertLess(max(ys), design.heightMm - 6.0)
+
+    def test_proxy_blocks_chinese_uses_simple_proxy_geometry(self) -> None:
+        design = CardDesign(textRenderMode="proxy_blocks")
+        pos = CardPosition(1, 0, 0, 0, 0, 0, design.widthMm, design.heightMm)
+        word = WordEntry(index=1, chinese="不客气")
+        parts = build_card_parts(word, "chinese", pos, design)
+        text = next(part for part in parts if part.role == "frontText")
+        self.assertLess(len(text.mesh.faces), 40)
+        xs = [x for x, _, _ in text.mesh.vertices]
+        self.assertGreaterEqual(min(xs), 0)
+        self.assertLessEqual(max(xs), design.widthMm)
+
+    def test_line_char_limit_wraps_inside_words_for_export(self) -> None:
+        design = CardDesign(englishLineChars=6, targetLineChars=5, pinyinLineChars=4, hungarianLineChars=7)
+        self.assertEqual(_apply_line_char_limit("extraordinary", "english", design), "extrao\nrdinar\ny")
+        self.assertEqual(_apply_line_char_limit("privetmir", "target", design), "prive\ntmir")
+        self.assertEqual(_apply_line_char_limit("xuesheng", "pinyin", design), "xues\nheng")
+
     def test_chinese_text_scale_changes_export_geometry(self) -> None:
         small = CardDesign(chineseTextScale=0.7)
         large = CardDesign(chineseTextScale=1.3)
@@ -77,6 +108,17 @@ class ExporterTests(unittest.TestCase):
         large_text = next(part for part in build_card_parts(HSK1_SAMPLE[0], "chinese", pos, large) if part.role == "frontText")
         small_width = max(x for x, _, _ in small_text.mesh.vertices) - min(x for x, _, _ in small_text.mesh.vertices)
         large_width = max(x for x, _, _ in large_text.mesh.vertices) - min(x for x, _, _ in large_text.mesh.vertices)
+        self.assertGreater(large_width, small_width)
+
+    def test_word_override_scale_changes_single_export_geometry(self) -> None:
+        design = CardDesign()
+        pos = CardPosition(1, 0, 0, 0, 0, 0, design.widthMm, design.heightMm)
+        small_word = WordEntry(index=1, chinese="你", pinyin="ni", overrides={"pinyin": {"scale": 0.7}})
+        large_word = WordEntry(index=1, chinese="你", pinyin="ni", overrides={"pinyin": {"scale": 1.4}})
+        small = next(part for part in build_card_parts(small_word, "pinyin", pos, design) if part.role == "frontText")
+        large = next(part for part in build_card_parts(large_word, "pinyin", pos, design) if part.role == "frontText")
+        small_width = max(x for x, _, _ in small.mesh.vertices) - min(x for x, _, _ in small.mesh.vertices)
+        large_width = max(x for x, _, _ in large.mesh.vertices) - min(x for x, _, _ in large.mesh.vertices)
         self.assertGreater(large_width, small_width)
 
     def test_hanzi_guide_scale_changes_export_geometry(self) -> None:
@@ -210,7 +252,7 @@ class ExporterTests(unittest.TestCase):
         )
         result = export_zip(request)
         with zipfile.ZipFile(result["downloadPath"]) as outer:
-            data = outer.read("plates_3mf/chinese_page_01.3mf")
+            data = outer.read("plates_3mf/Chinese_page_01.3mf")
         layer_path = Path("exports/test_layers.3mf")
         layer_path.write_bytes(data)
         with zipfile.ZipFile(layer_path) as archive:
@@ -248,7 +290,7 @@ class ExporterTests(unittest.TestCase):
         )
         result = export_zip(request)
         with zipfile.ZipFile(result["downloadPath"]) as outer:
-            data = outer.read("plates_3mf/english_page_01.3mf")
+            data = outer.read("plates_3mf/English_page_01.3mf")
             manifest = json.loads(outer.read("MANIFEST.json").decode("utf-8"))
         layer_path = Path("exports/test_default_layers.3mf")
         layer_path.write_bytes(data)
@@ -275,17 +317,66 @@ class ExporterTests(unittest.TestCase):
             names = set(archive.namelist())
             self.assertIn("README.md", names)
             self.assertIn("MANIFEST.json", names)
-            self.assertIn("plates_3mf/chinese_page_01.3mf", names)
-            self.assertIn("plates_3mf/english_page_01.3mf", names)
-            self.assertIn("plates_3mf/hungarian_page_01.3mf", names)
-            self.assertIn("3mf_whole_plate_single/chinese/page_01.3mf", names)
-            self.assertIn("3mf_whole_plate_per_card_objects/chinese/page_01.3mf", names)
+            self.assertIn("plates_3mf/Chinese_page_01.3mf", names)
+            self.assertIn("plates_3mf/English_page_01.3mf", names)
+            self.assertIn("plates_3mf/Hungarian_page_01.3mf", names)
+            self.assertIn("3mf_whole_plate_single/Chinese/page_01.3mf", names)
+            self.assertIn("3mf_whole_plate_per_card_objects/Chinese/page_01.3mf", names)
             self.assertIn("3mf/hsk_parts_per_card.3mf", names)
             self.assertIn("3mf/hsk_each_card_separate.3mf", names)
             self.assertIn("3mf/hsk_plate_role_grouping.3mf", names)
             self.assertIn("plates_stl/chinese_page_01.stl", names)
             self.assertIn("stl_plate_roles/chinese/page_01/base.stl", names)
             self.assertIn("stl_plate_roles/chinese/page_01/hanziGuide.stl", names)
+
+    def test_flashcard_export_ignores_visible_plate_label(self) -> None:
+        request = ExportRequest(
+            words=HSK1_SAMPLE[:4],
+            languages=["chinese"],
+            rangeStart=1,
+            rangeEnd=4,
+            printer=PrinterProfile(),
+            design=CardDesign(rows=2, columns=2),
+            formats=["stl", "3mf", "zip"],
+            plateLabel=PlateLabelSettings(mode="visible"),
+        )
+        result = export_zip(request)
+        with zipfile.ZipFile(result["downloadPath"]) as archive:
+            manifest = json.loads(archive.read("MANIFEST.json").decode("utf-8"))
+            data = archive.read("plates_3mf/Chinese_page_01.3mf")
+        self.assertNotIn("plateLabel", manifest["plates"][0]["layers"])
+        with zipfile.ZipFile(BytesIO(data)) as model_archive:
+            model = model_archive.read("3D/3dmodel.model").decode("utf-8")
+        self.assertNotIn("plateLabel", model)
+
+    def test_export_contains_settings_and_text_overrides_snapshot(self) -> None:
+        words = [
+            WordEntry(index=1, chinese="你", pinyin="nǐ", english="you", target="ты", hungarian="te", overrides={"pinyin": {"scale": 1.35, "lineChars": 4}})
+        ]
+        request = ExportRequest(
+            words=words,
+            languages=["pinyin"],
+            rangeStart=1,
+            rangeEnd=1,
+            printer=PrinterProfile(),
+            design=CardDesign(pinyinLineChars=5),
+            formats=["stl", "3mf", "zip"],
+            ui={"lineChars": {"pinyin": 5}},
+        )
+        result = export_zip(request)
+        with zipfile.ZipFile(result["downloadPath"]) as archive:
+            names = set(archive.namelist())
+            self.assertIn("source/settings.json", names)
+            self.assertIn("source/text-overrides.json", names)
+            manifest = json.loads(archive.read("MANIFEST.json").decode("utf-8"))
+            card_plan = json.loads(archive.read("source/card-plan.json").decode("utf-8"))
+            overrides = json.loads(archive.read("source/text-overrides.json").decode("utf-8"))
+            settings = json.loads(archive.read("source/settings.json").decode("utf-8"))
+        self.assertEqual(manifest["settings"]["design"]["pinyinLineChars"], 5)
+        self.assertEqual(manifest["textOverrideCount"], 1)
+        self.assertEqual(card_plan["cards"][0]["overrides"]["scale"], 1.35)
+        self.assertEqual(overrides["entries"][0]["overrides"]["pinyin"]["lineChars"], 4)
+        self.assertEqual(settings["ui"]["lineChars"]["pinyin"], 5)
 
     def test_primary_plate_file_count_matches_preview_pages(self) -> None:
         request = ExportRequest(

@@ -240,13 +240,14 @@ def build_game_card_parts(
     deck_name: str,
     position: CardPosition,
     design: CardDesign,
+    overrides: dict | None = None,
 ) -> list[Part]:
     x, y = position.x, position.y
     w, h = position.width, position.height
     t = design.thicknessMm
     surface_z = max(0, t - SURFACE_EMBED_MM)
     text_value = str(text or "?").strip() or "?"
-    text_meshes = _text_value_meshes(f"{deck_name}_{card_id:03d}_{language}", text_value, language, x + w * 0.1, y + h * 0.15, w * 0.8, h * 0.7, surface_z, design)
+    text_meshes = _text_value_meshes(f"{deck_name}_{card_id:03d}_{language}", text_value, language, x + w * 0.1, y + h * 0.15, w * 0.8, h * 0.7, surface_z, design, overrides)
     role_meshes: dict[str, list[Mesh]] = {
         "base": _base_meshes(back_id, x, y, w, h, t, design),
         "border": _border_meshes(card_id, x, y, surface_z, w, h, design),
@@ -364,8 +365,8 @@ def build_domino_tile_parts(tile, position: CardPosition, design: CardDesign) ->
         "border": _border_meshes(tile.cardId, x, y, surface_z, w, h, design),
         "divider": _divider_meshes(tile, x, y, surface_z, w, h, design),
         "frontText": [
-            *_text_value_meshes(f"domino_{tile.cardId:03d}_left", tile.left.text, tile.left.languageCode, *left_box, surface_z, design),
-            *_text_value_meshes(f"domino_{tile.cardId:03d}_right", tile.right.text, tile.right.languageCode, *right_box, surface_z, design),
+            *_text_value_meshes(f"domino_{tile.cardId:03d}_left", tile.left.text, tile.left.languageCode, *left_box, surface_z, design, getattr(tile.left, "overrides", None)),
+            *_text_value_meshes(f"domino_{tile.cardId:03d}_right", tile.right.text, tile.right.languageCode, *right_box, surface_z, design, getattr(tile.right, "overrides", None)),
         ],
         "backNumber": _domino_back_number_meshes(tile, x, y, w, h, design) if design.backNumberMode == "deboss_colored" else [],
         "doubleMarker": _double_marker_meshes(tile, x, y, surface_z, w, h, design) if tile.tileType == "double" else [],
@@ -400,19 +401,24 @@ def _text_value_meshes(
     h: float,
     z: float,
     design: CardDesign,
+    overrides: dict | None = None,
 ) -> list[Mesh]:
-    text = str(text or "?").strip() or "?"
-    px = CHINESE_RASTER_PX if language == "chinese" else 128
-    py = CHINESE_RASTER_PX if language == "chinese" else 96
-    runs = text_runs(text, language, px, py)
+    text = _apply_line_char_limit(str(text or "?").strip() or "?", language, design, overrides)
+    if design.textRenderMode == "proxy_blocks":
+        fake = _fake_word_for_text(text, language, overrides)
+        return _fallback_text_proxy(fake, language, x, y, z, w, h, design)
+    fine = design.textRenderMode == "raster_fine"
+    px = (256 if fine else CHINESE_RASTER_PX) if language == "chinese" else (192 if fine else 128)
+    py = (256 if fine else CHINESE_RASTER_PX) if language == "chinese" else (144 if fine else 96)
+    runs = text_runs(text, language, px, py, _max_lines(language, design, overrides))
     if not runs:
-        fake = WordEntry(1, text if language == "chinese" else "", text if language == "pinyin" else "", text if language == "english" else "", text if language == "target" else "", text if language == "hungarian" else "")
+        fake = _fake_word_for_text(text, language, overrides)
         return _fallback_text_proxy(fake, language, x, y, z, w, h, design)
     min_rx = min(rx for rx, _, _, _ in runs)
     max_rx = max(rx + rw for rx, _, rw, _ in runs)
     min_ry = min(ry for _, ry, _, _ in runs)
     max_ry = max(ry + rh for _, ry, _, rh in runs)
-    text_scale = _text_scale(language, design)
+    text_scale = _text_scale(language, design, overrides=overrides)
     scale = min(w / max(1, max_rx - min_rx), h / max(1, max_ry - min_ry)) * text_scale
     scale_x = scale
     scale_y = scale
@@ -481,19 +487,32 @@ def _front_text_proxy(
     h: float,
     design: CardDesign,
 ) -> list[Mesh]:
-    text = word.text_for(language).strip() or "?"
-    text_scale = _text_scale(language, design)
+    text = _apply_line_char_limit(word.text_for(language).strip() or "?", language, design, _word_overrides(word, language))
+    text_scale = _text_scale(language, design, word)
+    if design.textRenderMode == "proxy_blocks":
+        return _fallback_text_proxy(word, language, x, y, z, w, h, design)
     if language == "chinese":
         chars = _cjk_chars(text)
         if 1 < len(chars) <= 3:
-            return _multi_hanzi_text_meshes(word.index, chars, _hanzi_cell_boxes(x, y, w, h, design, len(chars)), z, design, text_scale)
+            return _multi_hanzi_text_meshes(
+                word.index,
+                chars,
+                _hanzi_cell_boxes(x, y, w, h, design, len(chars)),
+                z,
+                design,
+                text_scale,
+                fine=design.textRenderMode == "raster_fine",
+            )
     inset_x = w * (0.12 if language == "chinese" else 0.1)
     inset_y = h * (0.14 if language == "chinese" else 0.18)
     area_x, area_y = x + inset_x, y + inset_y
     area_w, area_h = w - inset_x * 2, h - inset_y * 2
-    px = CHINESE_RASTER_PX if language == "chinese" else 128
-    py = CHINESE_RASTER_PX if language == "chinese" else 96
-    runs = text_runs(text, language, px, py)
+    if design.textRenderMode == "proxy_blocks":
+        return _fallback_text_proxy(word, language, x, y, z, w, h, design)
+    fine = design.textRenderMode == "raster_fine"
+    px = (256 if fine else CHINESE_RASTER_PX) if language == "chinese" else (192 if fine else 128)
+    py = (256 if fine else CHINESE_RASTER_PX) if language == "chinese" else (144 if fine else 96)
+    runs = text_runs(text, language, px, py, _max_lines(language, design, _word_overrides(word, language)))
     if not runs:
         return _fallback_text_proxy(word, language, x, y, z, w, h, design)
 
@@ -532,18 +551,21 @@ def _multi_hanzi_text_meshes(
     z: float,
     design: CardDesign,
     text_scale: float,
+    fine: bool = False,
 ) -> list[Mesh]:
     meshes: list[Mesh] = []
+    raster_px = 256 if fine else CHINESE_RASTER_PX
+    fill = 0.68 if fine else 0.82
     for char_index, char in enumerate(chars):
         cell_x, cell_y, cell_w, cell_h = cells[char_index]
-        runs = text_runs(char, "chinese", CHINESE_RASTER_PX, CHINESE_RASTER_PX)
+        runs = text_runs(char, "chinese", raster_px, raster_px)
         if not runs:
             continue
         min_rx = min(rx for rx, _, _, _ in runs)
         max_rx = max(rx + rw for rx, _, rw, _ in runs)
         min_ry = min(ry for _, ry, _, _ in runs)
         max_ry = max(ry + rh for _, ry, _, rh in runs)
-        scale = min(cell_w * 0.86 / max(1, max_rx - min_rx), cell_h * 0.82 / max(1, max_ry - min_ry)) * text_scale
+        scale = min(cell_w * fill / max(1, max_rx - min_rx), cell_h * fill / max(1, max_ry - min_ry)) * text_scale
         ink_w = (max_rx - min_rx) * scale
         ink_h = (max_ry - min_ry) * scale
         offset_x = cell_x + (cell_w - ink_w) / 2
@@ -577,8 +599,9 @@ def _fallback_text_proxy(
 ) -> list[Mesh]:
     text = word.text_for(language).strip() or "?"
     line_count = 1 if language in ("chinese", "pinyin") or len(text) <= 14 else 2
-    max_text_w = w * (0.72 if language == "chinese" else 0.78)
-    line_h = h * (0.16 if line_count == 2 else 0.2)
+    text_scale = _text_scale(language, design, word)
+    max_text_w = w * (0.72 if language == "chinese" else 0.78) * min(1.8, text_scale)
+    line_h = h * (0.16 if line_count == 2 else 0.2) * min(1.8, text_scale)
     proxy_h = _raised_height(design.textHeightMm)
     meshes: list[Mesh] = []
     for line in range(line_count):
@@ -719,16 +742,113 @@ def _subtract_rects_from_box_mesh(mesh: Mesh, blockers: list[tuple[float, float,
     return pieces
 
 
-def _text_scale(language: Language, design: CardDesign) -> float:
+def _fake_word_for_text(text: str, language: Language, overrides: dict | None = None) -> WordEntry:
+    return WordEntry(
+        1,
+        text if language == "chinese" else "",
+        text if language == "pinyin" else "",
+        text if language == "english" else "",
+        text if language == "target" else "",
+        text if language == "hungarian" else "",
+        overrides={language: overrides or {}} if overrides else {},
+    )
+
+
+def _text_scale(language: Language, design: CardDesign, word: WordEntry | None = None, overrides: dict | None = None) -> float:
     if language == "chinese":
-        return max(0.2, design.chineseTextScale)
+        base = design.chineseTextScale
+    elif language == "pinyin":
+        base = design.pinyinTextScale
+    elif language == "english":
+        base = design.englishTextScale
+    elif language == "hungarian":
+        base = design.hungarianTextScale
+    else:
+        base = design.targetTextScale
+    override = overrides if overrides is not None else _word_overrides(word, language)
+    scale = _override_number(override, "scale", 1.0)
+    return max(0.2, base * scale)
+
+
+def _word_overrides(word: WordEntry | None, language: Language) -> dict:
+    if not word:
+        return {}
+    overrides = getattr(word, "overrides", None) or {}
+    value = overrides.get(language) if isinstance(overrides, dict) else None
+    return value if isinstance(value, dict) else {}
+
+
+def _override_number(overrides: dict | None, key: str, default: float) -> float:
+    if not overrides:
+        return default
+    value = overrides.get(key)
+    if value in (None, ""):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _override_int(overrides: dict | None, key: str, default: int) -> int:
+    if not overrides:
+        return default
+    value = overrides.get(key)
+    if value in (None, ""):
+        return default
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _line_char_limit(language: Language, design: CardDesign, overrides: dict | None = None) -> int:
     if language == "pinyin":
-        return max(0.2, design.pinyinTextScale)
+        return max(2, _override_int(overrides, "lineChars", int(design.pinyinLineChars)))
     if language == "english":
-        return max(0.2, design.englishTextScale)
+        return max(2, _override_int(overrides, "lineChars", int(design.englishLineChars)))
     if language == "hungarian":
-        return max(0.2, design.hungarianTextScale)
-    return max(0.2, design.targetTextScale)
+        return max(2, _override_int(overrides, "lineChars", int(design.hungarianLineChars)))
+    if language == "target":
+        return max(2, _override_int(overrides, "lineChars", int(design.targetLineChars)))
+    return 0
+
+
+def _max_lines(language: Language, design: CardDesign, overrides: dict | None = None) -> int:
+    default = 2 if language == "pinyin" else 3
+    return _override_int(overrides, "maxLines", default)
+
+
+def _apply_line_char_limit(text: str, language: Language, design: CardDesign, overrides: dict | None = None) -> str:
+    limit = _line_char_limit(language, design, overrides)
+    if not limit:
+        return text
+    return "\n".join(_wrap_hard_line(line, limit) for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"))
+
+
+def _wrap_hard_line(line: str, limit: int) -> str:
+    normalized = " / ".join(part.strip() for part in line.split("/")).strip()
+    if not normalized:
+        return ""
+    lines: list[str] = []
+    current = ""
+    for token in normalized.split():
+        for chunk in _split_token(token, limit):
+            candidate = f"{current} {chunk}".strip() if current else chunk
+            if len(candidate) <= limit or not current:
+                current = candidate
+            else:
+                lines.append(current)
+                current = chunk
+    if current:
+        lines.append(current)
+    return "\n".join(lines)
+
+
+def _split_token(token: str, limit: int) -> list[str]:
+    if len(token) <= limit:
+        return [token]
+    return [token[index : index + limit] for index in range(0, len(token), limit)]
 
 
 def _diagonal_proxy(index: int, x: float, y: float, z: float, w: float, h: float, line_w: float, height: float, suffix: str = "") -> list[Mesh]:

@@ -81,7 +81,7 @@ class DominoTests(unittest.TestCase):
             with zipfile.ZipFile(result["downloadPath"]) as archive:
                 stl = archive.read("plates_stl/domino_page_01.stl").decode("utf-8")
                 stl_z = [float(match.group(1)) for match in re.finditer(r"vertex\s+[-0-9.]+\s+[-0-9.]+\s+([-0-9.]+)", stl)]
-                with zipfile.ZipFile(BytesIO(archive.read("plates_3mf/domino_page_01.3mf"))) as model_archive:
+                with zipfile.ZipFile(BytesIO(archive.read("plates_3mf/Domino_page_01.3mf"))) as model_archive:
                     model = model_archive.read("3D/3dmodel.model").decode("utf-8")
                 model_z = [float(match.group(1)) for match in re.finditer(r'z="([-0-9.]+)"', model)]
                 manifest = json.loads(archive.read("MANIFEST.json").decode("utf-8"))
@@ -119,7 +119,7 @@ class DominoTests(unittest.TestCase):
             self.assertIn("print_profiles/bambu_a1_mini_quality.md", names)
             self.assertIn("print_profiles/profile-summary.json", names)
             self.assertIn("rules/ru/domino_beginner.md", names)
-            self.assertIn("plates_3mf/domino_page_01.3mf", names)
+            self.assertIn("plates_3mf/Domino_page_01.3mf", names)
             manifest = json.loads(archive.read("MANIFEST.json").decode("utf-8"))
             self.assertEqual(manifest["gameMode"], "domino")
             self.assertEqual(manifest["tileCount"], 8)
@@ -128,13 +128,13 @@ class DominoTests(unittest.TestCase):
             self.assertGreater(manifest["dimensions"]["totalModelHeightMm"], 2.2)
             self.assertIn("plateLabel", manifest["plates"][0]["layers"])
             self.assertIn("divider", manifest["plates"][0]["layers"])
-            model_data = archive.read("plates_3mf/domino_page_01.3mf")
+            model_data = archive.read("plates_3mf/Domino_page_01.3mf")
         import io
 
         with zipfile.ZipFile(io.BytesIO(model_data)) as model_zip:
             model = model_zip.read("3D/3dmodel.model").decode("utf-8")
             self.assertIn("RecommendedLayerHeightMm", model)
-            self.assertIn("hsk1_old_001-004_domino_domino_page_01", model)
+            self.assertIn("hsk1_old_001-004_domino_Domino_page_01", model)
 
     def test_matching_exports_single_printable_game_deck(self) -> None:
         request = ExportRequest(
@@ -152,7 +152,7 @@ class DominoTests(unittest.TestCase):
         self.assertTrue(result["ok"], json.dumps(result, ensure_ascii=False))
         with zipfile.ZipFile(result["downloadPath"]) as archive:
             names = set(archive.namelist())
-            self.assertIn("plates_3mf/matching_page_01.3mf", names)
+            self.assertIn("plates_3mf/Matching_page_01.3mf", names)
             self.assertIn("plates_stl/matching_page_01.stl", names)
             self.assertIn("answer_sheets/matching.md", names)
             manifest = json.loads(archive.read("MANIFEST.json").decode("utf-8"))

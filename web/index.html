@@ -16,7 +16,7 @@
           </div>
           <div class="header-controls">
             <label class="dataset-select">
-              HSK set
+              Word set
               <select id="datasetSelect"></select>
             </label>
             <label class="dataset-select">
@@ -35,6 +35,8 @@
             <div class="toolbar">
               <button id="loadSampleBtn" title="Reload selected HSK set">Reload set</button>
               <button id="loadOriginalBtn" title="Reload selected HSK set without saved edits">Load original</button>
+              <button id="undoBtn" type="button" title="Undo last project edit">Undo</button>
+              <button id="redoBtn" type="button" title="Redo last undone project edit">Redo</button>
               <button id="importJsonBtn">Import JSON</button>
               <button id="importCsvBtn">Import CSV</button>
               <button id="enrichBtn">Enrich</button>
@@ -62,20 +64,28 @@
 
             <div class="language-row">
               <label>
-                Extra language
+                Optional extra language
                 <select id="extraLanguagePreset">
-                  <option value="hungarian" selected>Hungarian</option>
+                  <option value="custom" selected>Custom</option>
                   <option value="german">German</option>
                   <option value="spanish">Spanish</option>
                   <option value="french">French</option>
-                  <option value="custom">Custom</option>
                 </select>
               </label>
               <label>
                 Label
-                <input id="extraLanguageLabel" type="text" value="Hungarian" />
+                <input id="extraLanguageLabel" type="text" value="" placeholder="Optional" />
               </label>
             </div>
+            <fieldset class="language-picker">
+              <legend>Visible languages</legend>
+              <label class="checkbox-row"><input id="showChinese" type="checkbox" checked /> Chinese</label>
+              <label class="checkbox-row"><input id="showPinyin" type="checkbox" checked /> Pinyin</label>
+              <label class="checkbox-row"><input id="showEnglish" type="checkbox" checked /> English</label>
+              <label class="checkbox-row"><input id="showTarget" type="checkbox" checked /> Russian</label>
+              <label class="checkbox-row"><input id="showHungarian" type="checkbox" checked /> Hungarian</label>
+              <label class="checkbox-row"><input id="showExtra" type="checkbox" /> Extra language</label>
+            </fieldset>
           </div>
         </details>
 
@@ -138,8 +148,16 @@
             <div class="recommendation-controls settings-grid">
               <label>English max chars <input id="englishMaxChars" type="number" value="18" min="4" step="1" /></label>
               <label>Russian max chars <input id="targetMaxChars" type="number" value="18" min="4" step="1" /></label>
-              <label>Extra max chars <input id="hungarianMaxChars" type="number" value="18" min="4" step="1" /></label>
+              <label>Hungarian max chars <input id="hungarianMaxChars" type="number" value="18" min="4" step="1" /></label>
+              <label>Pinyin line chars <input id="pinyinLineChars" type="number" value="12" min="2" step="1" /></label>
+              <label>English line chars <input id="englishLineChars" type="number" value="10" min="2" step="1" /></label>
+              <label>Russian line chars <input id="targetLineChars" type="number" value="10" min="2" step="1" /></label>
+              <label>Hungarian line chars <input id="hungarianLineChars" type="number" value="11" min="2" step="1" /></label>
+              <label>English word break <input id="englishMaxWordChars" type="number" value="10" min="4" step="1" /></label>
+              <label>Russian word break <input id="targetMaxWordChars" type="number" value="10" min="4" step="1" /></label>
+              <label>Hungarian word break <input id="hungarianMaxWordChars" type="number" value="10" min="4" step="1" /></label>
               <button id="applyRecommendationsBtn" type="button">Apply recommendations</button>
+              <button id="openTableEditorBtn" type="button">Open table editor</button>
             </div>
             <p class="hint" id="recommendationHint">Recommended text is used for cards. Manual edits are preserved when max length changes.</p>
             <div class="table-wrap">
@@ -226,6 +244,14 @@
             <label>Hungarian scale <input id="hungarianTextScale" type="range" min="0.5" max="1.6" value="1" step="0.05" /></label>
             <label>Hanzi guide scale <input id="hanziGuideScale" type="range" min="0.5" max="1.8" value="1" step="0.05" /></label>
             <label>
+              Text geometry
+              <select id="textRenderMode">
+                <option value="raster_blocks" selected>Raster blocks</option>
+                <option value="raster_fine">Raster fine</option>
+                <option value="proxy_blocks">Proxy blocks</option>
+              </select>
+            </label>
+            <label>
               Hanzi guide
               <select id="hanziGuide">
                 <option value="none">None</option>
@@ -276,6 +302,11 @@
             <label>Divider <input id="colorDivider" type="color" value="#f2b600" /></label>
             <label>Double <input id="colorDoubleMarker" type="color" value="#d9a000" /></label>
             <label>Hanzi <input id="colorHanziGuide" type="color" value="#dd3b2a" /></label>
+            <label>Chinese plate <input id="colorChinesePlate" type="color" value="#ffffff" /></label>
+            <label>Pinyin plate <input id="colorPinyinPlate" type="color" value="#eef6ff" /></label>
+            <label>English plate <input id="colorEnglishPlate" type="color" value="#eefbea" /></label>
+            <label>Russian plate <input id="colorTargetPlate" type="color" value="#fff1f1" /></label>
+            <label>Hungarian plate <input id="colorHungarianPlate" type="color" value="#fff6e8" /></label>
           </div>
         </details>
 
@@ -299,6 +330,22 @@
           <button id="closeHelpBtn" type="button">Close</button>
         </div>
         <div id="helpBody" class="help-body"></div>
+      </div>
+    </div>
+    <div id="tableEditorModal" class="modal" hidden>
+      <div class="modal-panel table-editor-panel">
+        <div class="modal-header">
+          <h2 id="tableEditorTitle">Vocabulary editor</h2>
+          <button id="closeTableEditorBtn" type="button">Close</button>
+        </div>
+        <div class="table-wrap table-editor-wrap">
+          <table id="modalWordTable">
+            <thead>
+              <tr></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     </div>
     <script src="/app.js"></script>

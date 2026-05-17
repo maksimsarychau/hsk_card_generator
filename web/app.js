@@ -3,6 +3,7 @@ const BASE_LANGUAGES = [
   ["pinyin", "Pinyin"],
   ["english", "English"],
   ["target", "Russian"],
+  ["hungarian", "Hungarian"],
 ];
 
 let previewMode = "front";
@@ -15,11 +16,20 @@ let presets = [];
 let datasetBaseWords = [];
 let uiLanguage = localStorage.getItem("hsk-card-ui-language") || "ru";
 let activeInspector = null;
+let modelRotation = { x: 58, z: -28 };
+let inspectorRerenderTimer = null;
+const HISTORY_LIMIT = 5;
+let undoStack = [];
+let redoStack = [];
+let historySuspended = false;
 
 const $ = (id) => document.getElementById(id);
 const CORRECTIONS_KEY = "hsk-card-dataset-corrections";
 const MODULE_STATE_KEY = "hsk-card-module-state";
 const TRANSLATION_FIELDS = ["english", "target", "hungarian"];
+const OVERRIDE_LANGUAGES = ["chinese", "pinyin", "english", "target", "hungarian"];
+const WRAPPABLE_LANGUAGES = ["pinyin", "english", "target", "hungarian"];
+let correctionsSaveTimer = null;
 
 const I18N = {
   en: {
@@ -46,7 +56,10 @@ const I18N = {
     exportPrint: "Export and print",
     tileColors: "Tile colors",
     applyRecommendations: "Apply recommendations",
+    openTableEditor: "Open table editor",
+    vocabularyEditor: "Vocabulary editor",
     recommendationHint: "Recommended text is used for cards. Manual edits are preserved when max length changes.",
+    visibleLanguages: "Visible languages",
   },
   ru: {
     simulator: "Симулятор",
@@ -72,16 +85,19 @@ const I18N = {
     exportPrint: "Экспорт и печать",
     tileColors: "Цвета костей",
     applyRecommendations: "Применить рекомендации",
+    openTableEditor: "Открыть редактор",
+    vocabularyEditor: "Редактор слов",
     recommendationHint: "Recommended-текст используется для карточек. Ручные правки сохраняются при изменении лимита.",
+    visibleLanguages: "Видимые языки",
   },
 };
 
 const LABEL_I18N = {
-  datasetSelect: ["HSK set", "Набор HSK"],
+  datasetSelect: ["Word set", "Набор слов"],
   uiLanguage: ["UI", "Интерфейс"],
   rangeStart: ["Range start", "Начало диапазона"],
   rangeEnd: ["Range end", "Конец диапазона"],
-  extraLanguagePreset: ["Extra language", "Доп. язык"],
+  extraLanguagePreset: ["Optional extra language", "Опциональный доп. язык"],
   extraLanguageLabel: ["Label", "Название"],
   gameMode: ["Mode", "Режим"],
   rulesLanguage: ["Rules language", "Язык правил"],
@@ -127,18 +143,39 @@ const LABEL_I18N = {
   textFitMode: ["Text fit", "Подгонка текста"],
   englishMaxChars: ["English max chars", "Макс. English"],
   targetMaxChars: ["Russian max chars", "Макс. Russian"],
-  hungarianMaxChars: ["Extra max chars", "Макс. доп. язык"],
+  hungarianMaxChars: ["Hungarian max chars", "Макс. Hungarian"],
+  pinyinLineChars: ["Pinyin line chars", "Строка Pinyin"],
+  englishLineChars: ["English line chars", "Строка English"],
+  targetLineChars: ["Russian line chars", "Строка Russian"],
+  hungarianLineChars: ["Hungarian line chars", "Строка Hungarian"],
+  englishMaxWordChars: ["English word break", "Перенос English"],
+  targetMaxWordChars: ["Russian word break", "Перенос Russian"],
+  hungarianMaxWordChars: ["Hungarian word break", "Перенос Hungarian"],
+  textRenderMode: ["Text geometry", "Геометрия текста"],
+  showChinese: ["Chinese", "Китайский"],
+  showPinyin: ["Pinyin", "Пиньинь"],
+  showEnglish: ["English", "Английский"],
+  showTarget: ["Russian", "Русский"],
+  showHungarian: ["Hungarian", "Венгерский"],
+  showExtra: ["Extra language", "Доп. язык"],
   colorBase: ["Base", "Основа"],
   colorText: ["Text", "Текст"],
   colorBorder: ["Border", "Ободок"],
   colorDivider: ["Divider", "Разделитель"],
   colorDoubleMarker: ["Double", "Дубль"],
   colorHanziGuide: ["Hanzi", "Ханзи"],
+  colorChinesePlate: ["Chinese plate", "Пластина Chinese"],
+  colorPinyinPlate: ["Pinyin plate", "Пластина Pinyin"],
+  colorEnglishPlate: ["English plate", "Пластина English"],
+  colorTargetPlate: ["Russian plate", "Пластина Russian"],
+  colorHungarianPlate: ["Hungarian plate", "Пластина Hungarian"],
 };
 
 const BUTTON_I18N = {
   loadSampleBtn: ["Reload set", "Перезагрузить набор"],
   loadOriginalBtn: ["Load original", "Чистый оригинал"],
+  undoBtn: ["Undo", "Назад"],
+  redoBtn: ["Redo", "Вперёд"],
   importJsonBtn: ["Import JSON", "Импорт JSON"],
   importCsvBtn: ["Import CSV", "Импорт CSV"],
   enrichBtn: ["Enrich", "Заполнить"],
@@ -151,9 +188,11 @@ const BUTTON_I18N = {
   savePresetBtn: ["Save", "Сохранить"],
   deletePresetBtn: ["Delete", "Удалить"],
   applyRecommendationsBtn: ["Apply recommendations", "Применить рекомендации"],
+  openTableEditorBtn: ["Open table editor", "Открыть редактор"],
   exportBtn: ["Export ZIP", "Экспорт ZIP"],
   closeInspectorBtn: ["Close", "Закрыть"],
   closeHelpBtn: ["Close", "Закрыть"],
+  closeTableEditorBtn: ["Close", "Закрыть"],
 };
 
 const FIELD_HELP = {
@@ -202,8 +241,40 @@ const FIELD_HELP = {
     ru: "Максимальная длина рекомендованного русского текста. Ручные recommended-значения не перезаписываются.",
   },
   hungarianMaxChars: {
-    en: "Maximum recommended extra-language length for a card.",
-    ru: "Максимальная длина рекомендованного текста для дополнительного языка.",
+    en: "Maximum recommended Hungarian length for a card.",
+    ru: "Максимальная длина рекомендованного венгерского текста.",
+  },
+  pinyinLineChars: {
+    en: "Maximum visible characters per pinyin line. Longer tokens are split, including inside words.",
+    ru: "Максимум символов в одной строке пиньиня. Длинные слова режутся внутри слова.",
+  },
+  englishLineChars: {
+    en: "Maximum visible characters per English line. This controls preview and exported text wrapping.",
+    ru: "Максимум символов в одной английской строке. Управляет переносом в preview и экспорте.",
+  },
+  targetLineChars: {
+    en: "Maximum visible characters per Russian line. This can split long words if needed.",
+    ru: "Максимум символов в одной русской строке. При необходимости режет длинные слова.",
+  },
+  hungarianLineChars: {
+    en: "Maximum visible characters per Hungarian line. This helps long Hungarian words stay readable.",
+    ru: "Максимум символов в одной венгерской строке. Помогает длинным словам оставаться читаемыми.",
+  },
+  englishMaxWordChars: {
+    en: "Maximum letters before a long English token is split onto another line.",
+    ru: "Максимум букв до автоматического переноса длинной части английского слова.",
+  },
+  targetMaxWordChars: {
+    en: "Maximum letters before a long Russian token is split onto another line.",
+    ru: "Максимум букв до автоматического переноса длинной части русского слова.",
+  },
+  hungarianMaxWordChars: {
+    en: "Maximum letters before a long Hungarian token is split onto another line.",
+    ru: "Максимум букв до автоматического переноса длинной части венгерского слова.",
+  },
+  textRenderMode: {
+    en: "Export geometry variant for slicer tests: current raster blocks, finer raster blocks, or simple proxy blocks.",
+    ru: "Вариант геометрии текста для проверки в слайсере: текущий raster, более fine raster или простые proxy-блоки.",
   },
   cornerRadius: {
     en: "Rounded corner radius for preview and exported geometry.",
@@ -278,8 +349,12 @@ function bindEvents() {
     });
   }
   $("loadSampleBtn").addEventListener("click", loadSample);
-  $("loadOriginalBtn").addEventListener("click", () => loadDataset(activeDatasetId, { ignoreCorrections: true }));
+  $("loadOriginalBtn").addEventListener("click", loadOriginalDataset);
   $("datasetSelect").addEventListener("change", () => loadDataset($("datasetSelect").value));
+  $("undoBtn").addEventListener("click", undoProjectEdit);
+  $("redoBtn").addEventListener("click", redoProjectEdit);
+  document.addEventListener("focusin", maybeRememberBeforeEdit);
+  document.addEventListener("keydown", handleHistoryKeys);
   $("importJsonBtn").addEventListener("click", () => openImport("json"));
   $("importCsvBtn").addEventListener("click", () => openImport("csv"));
   $("importCorrectionsBtn").addEventListener("click", () => openImport("corrections"));
@@ -289,7 +364,13 @@ function bindEvents() {
   $("saveCorrectionsBtn").addEventListener("click", saveDatasetCorrections);
   $("exportCorrectionsBtn").addEventListener("click", exportDatasetCorrections);
   $("clearCorrectionsBtn").addEventListener("click", clearDatasetCorrections);
+  $("openTableEditorBtn").addEventListener("click", openTableEditor);
+  $("closeTableEditorBtn").addEventListener("click", closeTableEditor);
+  $("tableEditorModal").addEventListener("click", (event) => {
+    if (event.target.id === "tableEditorModal") closeTableEditor();
+  });
   $("applyRecommendationsBtn").addEventListener("click", () => {
+    pushUndoSnapshot("apply-recommendations");
     applyRecommendationsToUnlocked();
     renderTable();
     schedulePreview();
@@ -329,10 +410,22 @@ function bindEvents() {
   document.querySelectorAll("input, select").forEach((input) => {
     if (!["fileInput", "datasetSelect"].includes(input.id)) input.addEventListener("input", schedulePreview);
   });
-  ["englishMaxChars", "targetMaxChars", "hungarianMaxChars"].forEach((id) => {
+  [
+    "englishMaxChars",
+    "targetMaxChars",
+    "hungarianMaxChars",
+    "pinyinLineChars",
+    "englishLineChars",
+    "targetLineChars",
+    "hungarianLineChars",
+    "englishMaxWordChars",
+    "targetMaxWordChars",
+    "hungarianMaxWordChars",
+  ].forEach((id) => {
     $(id)?.addEventListener("input", () => {
       applyRecommendationsToUnlocked();
       renderTable();
+      autoSaveDatasetCorrections();
       schedulePreview();
       saveLocal();
     });
@@ -343,9 +436,18 @@ function bindEvents() {
   $("extraLanguageLabel").addEventListener("input", () => {
     renderTable();
     renderPlates();
+    syncLanguageOrderToVisible();
     saveLocal();
   });
+  ["showChinese", "showPinyin", "showEnglish", "showTarget", "showHungarian", "showExtra"].forEach((id) => {
+    $(id)?.addEventListener("change", () => {
+      syncLanguageOrderToVisible();
+      schedulePreview();
+      saveLocal();
+    });
+  });
   renderPresetSelect();
+  updateHistoryButtons();
   installHelpButtons();
   applyI18n();
 }
@@ -383,6 +485,97 @@ function currentModuleState() {
   return state;
 }
 
+function currentHistorySnapshot() {
+  return {
+    words: exportWords(),
+    request: buildRequest(),
+    activeDatasetId,
+    previewMode,
+  };
+}
+
+function pushUndoSnapshot(reason = "edit") {
+  if (historySuspended) return;
+  const snapshot = currentHistorySnapshot();
+  const serialized = JSON.stringify(snapshot);
+  const last = undoStack[undoStack.length - 1];
+  if (last?.serialized === serialized) return;
+  undoStack.push({ snapshot, serialized, reason });
+  if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+  redoStack = [];
+  updateHistoryButtons();
+}
+
+function maybeRememberBeforeEdit(event) {
+  const target = event.target;
+  if (!target || target.id === "fileInput") return;
+  if (!target.matches?.("input, textarea, select")) return;
+  if (target.dataset.historyStarted === "1") return;
+  target.dataset.historyStarted = "1";
+  pushUndoSnapshot("field-edit");
+  const clear = () => {
+    delete target.dataset.historyStarted;
+    target.removeEventListener("blur", clear);
+    target.removeEventListener("change", clear);
+  };
+  target.addEventListener("blur", clear);
+  target.addEventListener("change", clear);
+}
+
+async function undoProjectEdit() {
+  if (!undoStack.length) return;
+  const current = currentHistorySnapshot();
+  const previous = undoStack.pop().snapshot;
+  redoStack.push({ snapshot: current, serialized: JSON.stringify(current), reason: "redo" });
+  if (redoStack.length > HISTORY_LIMIT) redoStack.shift();
+  await restoreHistorySnapshot(previous);
+}
+
+async function redoProjectEdit() {
+  if (!redoStack.length) return;
+  const current = currentHistorySnapshot();
+  const next = redoStack.pop().snapshot;
+  undoStack.push({ snapshot: current, serialized: JSON.stringify(current), reason: "undo" });
+  if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+  await restoreHistorySnapshot(next);
+}
+
+async function restoreHistorySnapshot(snapshot) {
+  historySuspended = true;
+  try {
+    activeDatasetId = snapshot.activeDatasetId || snapshot.request?.datasetId || activeDatasetId;
+    if (snapshot.request) applySavedRequest(snapshot.request);
+    words = normalizeWords(snapshot.words || []);
+    previewMode = snapshot.previewMode || previewMode;
+    document.querySelectorAll(".segmented button").forEach((button) => button.classList.toggle("active", button.dataset.mode === previewMode));
+    renderTable();
+    renderCorrectionsStatus();
+    saveLocal();
+    autoSaveDatasetCorrections();
+    await updatePreview();
+  } finally {
+    historySuspended = false;
+    updateHistoryButtons();
+  }
+}
+
+function handleHistoryKeys(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+  const key = event.key.toLowerCase();
+  if (key === "z" && !event.shiftKey) {
+    event.preventDefault();
+    undoProjectEdit();
+  } else if (key === "y" || (key === "z" && event.shiftKey)) {
+    event.preventDefault();
+    redoProjectEdit();
+  }
+}
+
+function updateHistoryButtons() {
+  if ($("undoBtn")) $("undoBtn").disabled = !undoStack.length;
+  if ($("redoBtn")) $("redoBtn").disabled = !redoStack.length;
+}
+
 function applyModuleState(state) {
   if (!state || typeof state !== "object") return;
   document.querySelectorAll("details.module[data-module-id]").forEach((module) => {
@@ -393,24 +586,42 @@ function applyModuleState(state) {
 }
 
 async function loadSample() {
+  if (words.length) pushUndoSnapshot("reload-set");
   await loadDataset(activeDatasetId);
 }
 
 async function loadDatasets() {
-  const response = await fetch("/api/datasets");
+  const response = await fetch(`/api/datasets?ts=${Date.now()}`);
   const data = await response.json();
   datasets = data.ok ? data.datasets : [];
   const select = $("datasetSelect");
-  select.innerHTML = datasets.map((dataset) => `<option value="${escapeAttr(dataset.id)}">${escapeHtml(dataset.label)} (${dataset.count})</option>`).join("");
+  select.innerHTML = datasetOptionsHtml(datasets);
   if (datasets.some((dataset) => dataset.id === activeDatasetId)) {
     select.value = activeDatasetId;
   }
 }
 
+function datasetOptionsHtml(items) {
+  const groups = [];
+  for (const dataset of items) {
+    const group = dataset.group || "Other";
+    let bucket = groups.find((item) => item.group === group);
+    if (!bucket) {
+      bucket = { group, datasets: [] };
+      groups.push(bucket);
+    }
+    bucket.datasets.push(dataset);
+  }
+  return groups.map((bucket) => {
+    const options = bucket.datasets.map((dataset) => `<option value="${escapeAttr(dataset.id)}">${escapeHtml(dataset.label)} (${dataset.count})</option>`).join("");
+    return `<optgroup label="${escapeAttr(bucket.group)}">${options}</optgroup>`;
+  }).join("");
+}
+
 async function loadDataset(datasetId, options = {}) {
   activeDatasetId = datasetId || activeDatasetId;
   $("datasetSelect").value = activeDatasetId;
-  const response = await fetch(`/api/dataset/${encodeURIComponent(activeDatasetId)}`);
+  const response = await fetch(`/api/dataset/${encodeURIComponent(activeDatasetId)}?ts=${Date.now()}`);
   const data = await response.json();
   if (!data.ok) return;
   words = normalizeWords(data.dataset.words);
@@ -425,7 +636,36 @@ async function loadDataset(datasetId, options = {}) {
   await updatePreview();
 }
 
+async function loadOriginalDataset() {
+  if (!confirmDanger(uiLanguage === "ru"
+    ? "Загрузить чистый оригинал? Все сохранённые правки для текущего набора будут удалены."
+    : "Load the clean original? All saved edits for the current set will be deleted.")) {
+    return;
+  }
+  if (activeDatasetId !== "custom") {
+    pushUndoSnapshot("load-original");
+    const all = loadAllCorrections();
+    delete all[activeDatasetId];
+    persistAllCorrections(all);
+  }
+  await loadDataset(activeDatasetId, { ignoreCorrections: true });
+}
+
+function confirmDanger(message) {
+  return window.confirm(message);
+}
+
 function openImport(mode) {
+  if (mode === "corrections" && !confirmDanger(uiLanguage === "ru"
+    ? "Импортировать правки? Текущие сохранённые правки для набора могут быть заменены."
+    : "Import edits? Current saved edits for the set may be replaced.")) {
+    return;
+  }
+  if (mode !== "corrections" && !confirmDanger(uiLanguage === "ru"
+    ? "Импортировать новый словарь? Текущий проект будет заменён импортированными словами."
+    : "Import a new vocabulary file? The current project words will be replaced.")) {
+    return;
+  }
   pendingImportMode = mode;
   $("fileInput").value = "";
   $("fileInput").click();
@@ -435,6 +675,7 @@ async function handleFile(event) {
   const file = event.target.files[0];
   if (!file) return;
   const text = await file.text();
+  pushUndoSnapshot("import-file");
   if (pendingImportMode === "corrections") {
     importDatasetCorrections(JSON.parse(text));
     return;
@@ -471,11 +712,19 @@ function parseCsv(text) {
 }
 
 function renderTable() {
+  renderTableElement($("wordTable"));
+  if (!$("tableEditorModal")?.hidden) renderTableElement($("modalWordTable"));
+}
+
+function renderTableElement(table) {
+  if (!table) return;
+  const isEditor = table.id === "modalWordTable";
   const isRu = uiLanguage === "ru";
   const orig = isRu ? "ориг." : "orig";
   const rec = isRu ? "recommended" : "recommended";
   const russian = isRu ? "Russian" : "Russian";
-  const headRow = $("wordTable").querySelector("thead tr");
+  const hungarian = "Hungarian";
+  const headRow = table.querySelector("thead tr");
   headRow.innerHTML = `
     <th>#</th>
     <th>汉字</th>
@@ -484,10 +733,10 @@ function renderTable() {
     <th>English (${rec})</th>
     <th>${russian} (${orig})</th>
     <th>${russian} (${rec})</th>
-    <th>${escapeHtml(extraLanguageLabel())} (${orig})</th>
-    <th>${escapeHtml(extraLanguageLabel())} (${rec})</th>
+    <th>${hungarian} (${orig})</th>
+    <th>${hungarian} (${rec})</th>
   `;
-  const tbody = $("wordTable").querySelector("tbody");
+  const tbody = table.querySelector("tbody");
   tbody.innerHTML = "";
   words.forEach((word, rowIndex) => {
     const tr = document.createElement("tr");
@@ -499,29 +748,99 @@ function renderTable() {
     };
     tr.innerHTML = `
       <td>${word.index}</td>
-      ${["chinese", "pinyin"].map((field) => `<td><input value="${escapeAttr(word[field] || "")}" data-row="${rowIndex}" data-field="${field}" /></td>`).join("")}
+      ${textTableCell(word, rowIndex, "chinese", isEditor)}
+      ${textTableCell(word, rowIndex, "pinyin", isEditor)}
       ${TRANSLATION_FIELDS.map((field) => `
-        <td><input class="orig-value" value="${escapeAttr(originalText(word, field))}" readonly tabindex="-1" /></td>
-        <td>
-          <input value="${escapeAttr(word[field] || "")}" data-row="${rowIndex}" data-field="${field}" />
-          <span class="cell-status ${status(field)}">${statusLabel(field)}</span>
-        </td>
+        <td>${originalTableCell(word, field)}</td>
+        ${textTableCell(word, rowIndex, field, isEditor, status(field), statusLabel(field))}
       `).join("")}
     `;
     tbody.appendChild(tr);
   });
-  tbody.querySelectorAll("input").forEach((input) => {
+  tbody.querySelectorAll("input[data-field], textarea[data-field]").forEach((input) => {
     input.addEventListener("input", () => {
       const row = Number(input.dataset.row);
       const field = input.dataset.field;
       words[row][field] = input.value;
       if (["pinyin", ...TRANSLATION_FIELDS].includes(field)) {
-        words[row].lockedFields = Array.from(new Set([...(words[row].lockedFields || []), field]));
+          words[row].lockedFields = Array.from(new Set([...(words[row].lockedFields || []), field]));
       }
+      applyTextToLatestLayout(words[row].index, field);
+      refreshWordMiniPreview(table, row, field);
+      autoSaveDatasetCorrections();
+      renderPlates();
+      scheduleInspectorRerender(140);
       schedulePreview();
       saveLocal();
+      syncTwinTable(table.id);
     });
   });
+  tbody.querySelectorAll("input[data-override], select[data-override]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const row = Number(input.dataset.row);
+      const language = input.dataset.language;
+      const key = input.dataset.override;
+      setWordOverride(row, language, key, input.value);
+      applyOverrideToLatestLayout(words[row].index, language);
+      refreshWordMiniPreview(table, row, language);
+      autoSaveDatasetCorrections();
+      renderPlates();
+      scheduleInspectorRerender(140);
+      schedulePreview();
+      saveLocal();
+      syncTwinTable(table.id);
+    });
+  });
+  installColumnResizers(table);
+}
+
+function originalTableCell(word, field) {
+  const text = originalText(word, field);
+  const rows = Math.min(6, Math.max(2, String(text || "").split("\n").reduce((sum, line) => sum + Math.max(1, Math.ceil(Array.from(line).length / 18)), 0)));
+  return `<textarea class="orig-value" readonly tabindex="-1" rows="${rows}">${escapeHtml(text)}</textarea>`;
+}
+
+function textTableCell(word, rowIndex, field, isEditor, status = "", statusLabel = "") {
+  const tag = field === "chinese" && !isEditor ? "input" : "textarea";
+  const editor = tag === "input"
+    ? `<input value="${escapeAttr(word[field] || "")}" data-row="${rowIndex}" data-field="${field}" />`
+    : `<textarea data-row="${rowIndex}" data-field="${field}">${escapeHtml(word[field] || "")}</textarea>`;
+  const statusHtml = status ? `<span class="cell-status ${status}">${statusLabel}</span>` : "";
+  const tools = isEditor ? wordOverrideTools(word, rowIndex, field) : "";
+  const preview = isEditor ? wordMiniPreview(word, field) : "";
+  return `<td class="${isEditor ? "editor-word-cell" : ""}">${editor}${statusHtml}${tools}${preview}</td>`;
+}
+
+function wordOverrideTools(word, rowIndex, language) {
+  const override = wordOverride(word, language);
+  const scale = override.scale ?? 1;
+  const lineChars = override.lineChars ?? (lineCharSettings()[language] || "");
+  const maxLines = override.maxLines ?? defaultMaxLines(language);
+  const wrapControls = WRAPPABLE_LANGUAGES.includes(language)
+    ? `
+      <label>${uiLanguage === "ru" ? "симв./стр." : "chars/line"} <input data-row="${rowIndex}" data-language="${language}" data-override="lineChars" type="number" min="2" step="1" value="${escapeAttr(lineChars)}" /></label>
+      <label>${uiLanguage === "ru" ? "строк" : "lines"} <input data-row="${rowIndex}" data-language="${language}" data-override="maxLines" type="number" min="1" max="8" step="1" value="${escapeAttr(maxLines)}" /></label>
+    `
+    : "";
+  return `
+    <div class="word-override-tools">
+      <label>${uiLanguage === "ru" ? "масштаб" : "scale"} <input data-row="${rowIndex}" data-language="${language}" data-override="scale" type="range" min="0.45" max="1.8" step="0.05" value="${escapeAttr(scale)}" /></label>
+      ${wrapControls}
+    </div>
+  `;
+}
+
+function wordMiniPreview(word, language) {
+  const pos = { index: word.index, x: 1, y: 1, width: numberValue("cardWidth", 30), height: numberValue("cardHeight", 30) };
+  const text = wordText(word, language) || "?";
+  return `<div class="word-mini-preview" data-preview-row="${word.index}" data-preview-language="${escapeAttr(language)}">${singleFlashcardSvg(pos, language, text, word).replace("inspector-svg", "mini-card-svg")}</div>`;
+}
+
+function refreshWordMiniPreview(table, rowIndex, language) {
+  if (!table || rowIndex < 0 || !words[rowIndex]) return;
+  const preview = Array.from(table.querySelectorAll(`.word-mini-preview[data-preview-row="${words[rowIndex].index}"]`))
+    .find((node) => node.dataset.previewLanguage === language);
+  if (preview) preview.outerHTML = wordMiniPreview(words[rowIndex], language);
 }
 
 function bindRangePair(rangeId, numberId) {
@@ -535,6 +854,67 @@ function bindRangePair(rangeId, numberId) {
     range.value = number.value;
     normalizeRangeOrder();
   });
+}
+
+function openTableEditor() {
+  $("tableEditorTitle").textContent = t("vocabularyEditor");
+  $("tableEditorModal").hidden = false;
+  renderTableElement($("modalWordTable"));
+}
+
+function closeTableEditor() {
+  $("tableEditorModal").hidden = true;
+}
+
+function syncTwinTable(sourceTableId) {
+  const twin = sourceTableId === "wordTable" ? $("modalWordTable") : $("wordTable");
+  if (twin && (sourceTableId === "modalWordTable" || !$("tableEditorModal")?.hidden)) {
+    renderTableElement(twin);
+  }
+}
+
+function installColumnResizers(table) {
+  const key = `hsk-card-column-widths-${table.id}`;
+  const widths = loadColumnWidths(key);
+  table.querySelectorAll("th").forEach((th, index) => {
+    if (widths[index]) th.style.width = `${widths[index]}px`;
+    if (th.querySelector(".col-resizer")) return;
+    const grip = document.createElement("span");
+    grip.className = "col-resizer";
+    grip.addEventListener("pointerdown", (event) => startColumnResize(event, table, th, index, key));
+    th.appendChild(grip);
+  });
+}
+
+function loadColumnWidths(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function startColumnResize(event, table, th, index, key) {
+  event.preventDefault();
+  const startX = event.clientX;
+  const startWidth = th.offsetWidth;
+  const onMove = (moveEvent) => {
+    const width = Math.max(54, startWidth + moveEvent.clientX - startX);
+    th.style.width = `${width}px`;
+  };
+  const onUp = () => {
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    const widths = loadColumnWidths(key);
+    widths[index] = Math.round(th.offsetWidth);
+    localStorage.setItem(key, JSON.stringify(widths));
+    const twin = table.id === "wordTable" ? $("modalWordTable") : $("wordTable");
+    if (twin) renderTableElement(twin);
+  };
+  document.addEventListener("pointermove", onMove);
+  document.addEventListener("pointerup", onUp);
 }
 
 function normalizeRangeOrder() {
@@ -574,6 +954,7 @@ function clamp(value, min, max) {
 }
 
 async function enrich() {
+  pushUndoSnapshot("enrich");
   const response = await fetch("/api/enrich", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -655,6 +1036,11 @@ function buildRequest(overrides = {}) {
       targetTextScale: numberValue("targetTextScale", 1),
       hungarianTextScale: numberValue("hungarianTextScale", 1),
       hanziGuideScale: numberValue("hanziGuideScale", 1),
+      textRenderMode: $("textRenderMode").value,
+      pinyinLineChars: numberValue("pinyinLineChars", 12),
+      englishLineChars: numberValue("englishLineChars", 10),
+      targetLineChars: numberValue("targetLineChars", 10),
+      hungarianLineChars: numberValue("hungarianLineChars", 11),
     },
     domino: {
       density: $("dominoDensity").value,
@@ -693,12 +1079,16 @@ function buildRequest(overrides = {}) {
     },
     colors: {
       roles: roleColors(),
+      languages: languageColors(),
     },
     formats: ["stl", "3mf", "zip"],
     ui: {
       extraLanguagePreset: $("extraLanguagePreset").value,
       extraLanguageLabel: extraLanguageLabel(),
       maxChars: maxCharSettings(),
+      lineChars: lineCharSettings(),
+      maxWordChars: maxWordCharSettings(),
+      selectedLanguages: selectedLanguageIds(),
       modules: currentModuleState(),
     },
     ...overrides,
@@ -728,6 +1118,8 @@ function captureSettingsPreset() {
 
 async function applySettingsPreset(preset) {
   if (!preset) return;
+  if (!confirmDanger(uiLanguage === "ru" ? `Загрузить пресет "${preset.name}"? Текущие настройки будут заменены.` : `Load preset "${preset.name}"? Current settings will be replaced.`)) return;
+  pushUndoSnapshot("load-preset");
   const current = buildRequest();
   const shouldLoadDataset = preset.datasetId && preset.datasetId !== activeDatasetId && datasets.some((dataset) => dataset.id === preset.datasetId);
   applySavedRequest({
@@ -937,6 +1329,10 @@ function applyI18n() {
   $("helpTitle").textContent = t("help");
   const recommendationHint = $("recommendationHint");
   if (recommendationHint) recommendationHint.textContent = t("recommendationHint");
+  const tableEditorTitle = $("tableEditorTitle");
+  if (tableEditorTitle) tableEditorTitle.textContent = t("vocabularyEditor");
+  const languageLegend = document.querySelector(".language-picker legend");
+  if (languageLegend) languageLegend.textContent = t("visibleLanguages");
   Object.entries(LABEL_I18N).forEach(([id, pair]) => setControlLabel(id, pair[uiLanguage === "ru" ? 1 : 0]));
   Object.entries(BUTTON_I18N).forEach(([id, pair]) => {
     const button = $(id);
@@ -961,6 +1357,11 @@ function applyI18n() {
   setSelectLabels("plateLabelMode", { none: ["None", "Нет"], visible: ["Visible", "Видимая"] });
   setSelectLabels("hanziGuide", { none: ["None", "Нет"], tian_4: ["4-part", "4 части"], mi_8: ["8-part", "8 частей"] });
   setSelectLabels("backMode", { deboss: ["Deboss", "Вдавленный"], deboss_colored: ["Deboss + color", "Вдавленный + цвет"] });
+  setSelectLabels("textRenderMode", {
+    raster_blocks: ["Raster blocks", "Raster-блоки"],
+    raster_fine: ["Raster fine", "Точный raster"],
+    proxy_blocks: ["Proxy blocks", "Proxy-блоки"],
+  });
   document.querySelectorAll(".segmented button").forEach((button) => {
     if (button.dataset.mode === "front") button.textContent = uiLanguage === "ru" ? "Лицевая" : "Front";
     if (button.dataset.mode === "back") button.textContent = uiLanguage === "ru" ? "После переворота" : "Back physical";
@@ -969,8 +1370,8 @@ function applyI18n() {
   const hint = document.querySelector(".game-engine .hint");
   if (hint) {
     hint.textContent = uiLanguage === "ru"
-      ? "Домино: дубли вроде [你 | nǐ] создают ветвление, обычные мосты продолжают цепочку."
-      : "Domino example: doubles like [你 | nǐ] branch, normal bridges continue the chain.";
+      ? `Порядок языков: ${parseLanguageOrder().join(", ")}. Дубли вроде [你 | nǐ] создают ветвление.`
+      : `Language order: ${parseLanguageOrder().join(", ")}. Doubles like [你 | nǐ] branch.`;
   }
   renderTable();
 }
@@ -1062,9 +1463,9 @@ function gameCardPlateSvg(page) {
     const front = previewMode === "front";
     return `
       <g class="preview-card" data-kind="game-card" data-card-id="${card.cardId}" data-page="${page}">
-        <rect x="${pos.x}" y="${pos.y}" width="${pos.width}" height="${pos.height}" rx="${previewCornerRadius(pos)}" fill="${roleColors().base}" stroke="${roleColors().border}" stroke-width="1.3" />
+        <rect x="${pos.x}" y="${pos.y}" width="${pos.width}" height="${pos.height}" rx="${previewCornerRadius(pos)}" fill="${plateBaseColor(card.languageCode)}" stroke="${roleColors().border}" stroke-width="1.3" />
         ${card.languageCode === "chinese" && front ? guideSvg({ ...pos, index: card.wordId }) : ""}
-        ${front ? cardTextSvg(pos, card.languageCode, card.text || "?") : backNumberSvg(pos, String(card.wordId).padStart(2, "0"))}
+        ${front ? cardTextSvg(pos, card.languageCode, card.text || "?", card.overrides) : backNumberSvg(pos, String(card.wordId).padStart(2, "0"))}
         ${front ? `<text x="${pos.x + pos.width / 2}" y="${pos.y + pos.height + 4.5}" text-anchor="middle" font-size="3.2" fill="#111">${languageShort(card.languageCode)} ${String(card.wordId).padStart(2, "0")}</text>` : ""}
       </g>
     `;
@@ -1081,12 +1482,12 @@ function plateSvg(language, page) {
     const text = language === "chinese" ? word.chinese : language === "pinyin" ? word.pinyin : language === "english" ? word.english : language === "hungarian" ? word.hungarian : word.target;
     const displayText = text || "?";
     const number = String(pos.index).padStart(2, "0");
-    const label = previewMode === "front" ? cardTextSvg(pos, language, displayText) : "";
+    const label = previewMode === "front" ? cardTextSvg(pos, language, displayText, wordOverride(word, language)) : "";
     const externalNumber = previewMode === "front" ? `<text x="${pos.x + pos.width / 2}" y="${pos.y + pos.height + 4.5}" text-anchor="middle" font-size="3.2" fill="#111">${number}</text>` : "";
     return `
       <g>
         <g class="preview-card" data-kind="flashcard" data-language="${language}" data-index="${pos.index}" data-page="${page}">
-        <rect x="${pos.x}" y="${pos.y}" width="${pos.width}" height="${pos.height}" rx="${previewCornerRadius(pos)}" fill="${roleColors().base}" stroke="${roleColors().border}" stroke-width="1.3" />
+        <rect x="${pos.x}" y="${pos.y}" width="${pos.width}" height="${pos.height}" rx="${previewCornerRadius(pos)}" fill="${plateBaseColor(language)}" stroke="${roleColors().border}" stroke-width="1.3" />
         ${language === "chinese" && previewMode === "front" ? guideSvg(pos) : ""}
         ${label}
         ${externalNumber}
@@ -1121,7 +1522,7 @@ function dominoPlateSvg(page) {
         <rect x="${pos.x}" y="${pos.y}" width="${pos.width}" height="${pos.height}" rx="${previewCornerRadius(pos)}" fill="${colors.base}" stroke="${tile.tileType === "double" ? colors.doubleMarker : colors.border}" stroke-width="${tile.tileType === "double" ? 1.8 : 1.3}" />
         <line x1="${pos.x + pos.width / 2}" y1="${pos.y + 2}" x2="${pos.x + pos.width / 2}" y2="${pos.y + pos.height - 2}" stroke="${colors.divider}" stroke-width="${tile.tileType === "double" ? 1.1 : 0.7}" />
         ${tile.tileType === "double" && front ? `<circle cx="${pos.x + pos.width / 2}" cy="${pos.y + pos.height / 2}" r="${Math.min(pos.width, pos.height) * 0.055}" fill="${colors.doubleMarker}" opacity="0.9" />` : ""}
-        ${front ? dominoHalfTextSvg(leftBox, left.languageCode, left.text) + dominoHalfTextSvg(rightBox, right.languageCode, right.text) : ""}
+        ${front ? dominoHalfTextSvg(leftBox, left.languageCode, left.text, left.overrides) + dominoHalfTextSvg(rightBox, right.languageCode, right.text, right.overrides) : ""}
         ${front ? `<text x="${pos.x + pos.width / 2}" y="${pos.y + pos.height + 4.5}" text-anchor="middle" font-size="3.2" fill="#111">${number}</text>` : ""}
         ${front ? `<text x="${leftBox.x + 1}" y="${pos.y + 4}" font-size="2.5" fill="#5b6575">${languageShort(left.languageCode)}</text><text x="${rightBox.x + 1}" y="${pos.y + 4}" font-size="2.5" fill="#5b6575">${languageShort(right.languageCode)}</text>` : ""}
         ${!front ? dominoBackNumberSvg(pos, leftBack, rightBack) : ""}
@@ -1132,8 +1533,8 @@ function dominoPlateSvg(page) {
   return `<svg class="plate-svg" viewBox="0 0 ${printerW} ${printerD}" aria-label="domino page ${page + 1}">${cards.join("")}</svg>`;
 }
 
-function dominoHalfTextSvg(box, language, text) {
-  const layout = fitTextLines(language, text || "?", box.width, box.height, box.width, box.height);
+function dominoHalfTextSvg(box, language, text, overrides = null) {
+  const layout = fitTextLines(language, text || "?", box.width, box.height, box.width, box.height, overrides);
   const x = box.x + box.width / 2;
   const lineHeight = layout.fontSize * 1.15;
   const totalHeight = lineHeight * layout.lines.length;
@@ -1175,28 +1576,38 @@ function openDominoInspector(tileId) {
   const tile = (latestLayout.cards || []).find((item) => item.cardId === tileId);
   const pos = latestLayout.positions.find((item) => item.index === tileId);
   if (!tile || !pos) return;
-  const leftFit = inspectFit(tile.left.languageCode, tile.left.text, pos.width * 0.39, pos.height * 0.64, pos.width, pos.height);
-  const rightFit = inspectFit(tile.right.languageCode, tile.right.text, pos.width * 0.39, pos.height * 0.64, pos.width, pos.height);
+  const leftFit = inspectFit(tile.left.languageCode, tile.left.text, pos.width * 0.39, pos.height * 0.64, pos.width, pos.height, tile.left.overrides);
+  const rightFit = inspectFit(tile.right.languageCode, tile.right.text, pos.width * 0.39, pos.height * 0.64, pos.width, pos.height, tile.right.overrides);
   $("inspectorTitle").textContent = `Domino ${String(tile.cardId).padStart(3, "0")} - ${tile.tileType}`;
   $("inspectorBody").innerHTML = `
-    <div class="inspector-grid">
-      <div class="inspector-preview"><h3>${escapeHtml(t("model3d"))}</h3>${dominoModel3d(tile)}</div>
-      <div class="inspector-preview"><h3>${escapeHtml(t("front2d"))}</h3>${singleDominoSvg(tile, pos)}</div>
-      <div class="inspector-preview"><h3>${escapeHtml(t("side"))}</h3>${sideProfileSvg()}</div>
+    <div class="inspector-layout">
+      <div class="inspector-left">
+        <div class="inspector-grid">
+          <div class="inspector-preview inspector-main-preview"><h3>${escapeHtml(t("model3d"))}</h3>${dominoModel3d(tile, pos)}</div>
+          <div class="inspector-preview"><h3>${escapeHtml(t("front2d"))}</h3>${singleDominoSvg(tile, pos)}</div>
+          <div class="inspector-preview"><h3>${escapeHtml(t("side"))}</h3>${sideProfileSvg(pos.width)}</div>
+        </div>
+      </div>
+      <div class="inspector-right">
+        ${dimensionTable([
+          ["Card", `${fmt(pos.width)} x ${fmt(pos.height)} mm`],
+          ["Base thickness", `${fmt(numberValue("thickness", 2))} mm`],
+          ["Total height", `${fmt(totalModelHeight())} mm`],
+          ["Text height", `${fmt(numberValue("textHeight", 0.55))} mm`],
+          ["Border", `${fmt(numberValue("borderWidth", 1))} x ${fmt(numberValue("borderHeight", 0.45))} mm`],
+          ["Back deboss", `${fmt(numberValue("backDepth", 0.4))} mm`],
+          ["Left", `${tile.left.text} (${languageShort(tile.left.languageCode)}), ${fmt(leftFit.fontSize)} mm font, ID ${tile.backIds[0]}`],
+          ["Right", `${tile.right.text} (${languageShort(tile.right.languageCode)}), ${fmt(rightFit.fontSize)} mm font, ID ${tile.backIds[1]}`],
+        ])}
+        ${inspectorEditorControls([
+          { wordId: tile.left.wordId, language: tile.left.languageCode, label: `Left ${tile.left.text}` },
+          { wordId: tile.right.wordId, language: tile.right.languageCode, label: `Right ${tile.right.text}` },
+        ])}
+      </div>
     </div>
-    ${dimensionTable([
-      ["Card", `${fmt(pos.width)} x ${fmt(pos.height)} mm`],
-      ["Base thickness", `${fmt(numberValue("thickness", 2))} mm`],
-      ["Total height", `${fmt(totalModelHeight())} mm`],
-      ["Text height", `${fmt(numberValue("textHeight", 0.55))} mm`],
-      ["Border", `${fmt(numberValue("borderWidth", 1))} x ${fmt(numberValue("borderHeight", 0.45))} mm`],
-      ["Back deboss", `${fmt(numberValue("backDepth", 0.4))} mm`],
-      ["Left", `${tile.left.text} (${languageShort(tile.left.languageCode)}), ${fmt(leftFit.fontSize)} mm font, ID ${tile.backIds[0]}`],
-      ["Right", `${tile.right.text} (${languageShort(tile.right.languageCode)}), ${fmt(rightFit.fontSize)} mm font, ID ${tile.backIds[1]}`],
-    ])}
-    ${inspectorScaleControls(tile.left.languageCode, tile.right.languageCode)}
   `;
   $("cardInspector").hidden = false;
+  bindInspectorModelDrag();
 }
 
 function openFlashcardInspector(index, language) {
@@ -1204,27 +1615,34 @@ function openFlashcardInspector(index, language) {
   const pos = latestLayout.positions.find((item) => item.index === index);
   if (!word || !pos) return;
   const text = language === "chinese" ? word.chinese : language === "pinyin" ? word.pinyin : language === "english" ? word.english : language === "hungarian" ? word.hungarian : word.target;
-  const fit = inspectFit(language, text, pos.width - scaledInset(pos) * 2.4, pos.height - scaledInset(pos) * 3.2, pos.width, pos.height);
+  const fit = inspectFit(language, text, pos.width - scaledInset(pos) * 2.4, pos.height - scaledInset(pos) * 3.2, pos.width, pos.height, wordOverride(word, language));
   $("inspectorTitle").textContent = `${languageShort(language)} card ${String(index).padStart(3, "0")}`;
   $("inspectorBody").innerHTML = `
-    <div class="inspector-grid">
-      <div class="inspector-preview"><h3>${escapeHtml(t("model3d"))}</h3>${flashcardModel3d(language, text)}</div>
-      <div class="inspector-preview"><h3>${escapeHtml(t("front2d"))}</h3>${singleFlashcardSvg(pos, language, text)}</div>
-      <div class="inspector-preview"><h3>${escapeHtml(t("side"))}</h3>${sideProfileSvg()}</div>
+    <div class="inspector-layout">
+      <div class="inspector-left">
+        <div class="inspector-grid">
+          <div class="inspector-preview inspector-main-preview"><h3>${escapeHtml(t("model3d"))}</h3>${flashcardModel3d(language, text, pos, word)}</div>
+          <div class="inspector-preview"><h3>${escapeHtml(t("front2d"))}</h3>${singleFlashcardSvg(pos, language, text, word)}</div>
+          <div class="inspector-preview"><h3>${escapeHtml(t("side"))}</h3>${sideProfileSvg(pos.width)}</div>
+        </div>
+      </div>
+      <div class="inspector-right">
+        ${dimensionTable([
+          ["Card", `${fmt(pos.width)} x ${fmt(pos.height)} mm`],
+          ["Base thickness", `${fmt(numberValue("thickness", 2))} mm`],
+          ["Total height", `${fmt(totalModelHeight())} mm`],
+          ["Fitted font", `${fmt(fit.fontSize)} mm`],
+          ["Lines", `${fit.lines.length}`],
+          ["Text height", `${fmt(numberValue("textHeight", 0.55))} mm`],
+          ["Border", `${fmt(numberValue("borderWidth", 1))} x ${fmt(numberValue("borderHeight", 0.45))} mm`],
+          ["Back deboss", `${fmt(numberValue("backDepth", 0.4))} mm`],
+        ])}
+        ${inspectorEditorControls([{ wordId: index, language, label: text }])}
+      </div>
     </div>
-    ${dimensionTable([
-      ["Card", `${fmt(pos.width)} x ${fmt(pos.height)} mm`],
-      ["Base thickness", `${fmt(numberValue("thickness", 2))} mm`],
-      ["Total height", `${fmt(totalModelHeight())} mm`],
-      ["Fitted font", `${fmt(fit.fontSize)} mm`],
-      ["Lines", `${fit.lines.length}`],
-      ["Text height", `${fmt(numberValue("textHeight", 0.55))} mm`],
-      ["Border", `${fmt(numberValue("borderWidth", 1))} x ${fmt(numberValue("borderHeight", 0.45))} mm`],
-      ["Back deboss", `${fmt(numberValue("backDepth", 0.4))} mm`],
-    ])}
-    ${inspectorScaleControls(language)}
   `;
   $("cardInspector").hidden = false;
+  bindInspectorModelDrag();
 }
 
 function closeInspector() {
@@ -1247,102 +1665,325 @@ function openGameCardInspector(cardId) {
   const card = (latestLayout.cards || []).find((item) => item.cardId === cardId);
   const pos = latestLayout.positions.find((item) => item.index === cardId);
   if (!card || !pos) return;
-  const fit = inspectFit(card.languageCode, card.text, pos.width - scaledInset(pos) * 2.4, pos.height - scaledInset(pos) * 3.2, pos.width, pos.height);
+  const fit = inspectFit(card.languageCode, card.text, pos.width - scaledInset(pos) * 2.4, pos.height - scaledInset(pos) * 3.2, pos.width, pos.height, card.overrides);
   $("inspectorTitle").textContent = `${latestLayout.gameMode} card ${String(cardId).padStart(3, "0")}`;
   $("inspectorBody").innerHTML = `
-    <div class="inspector-grid">
-      <div class="inspector-preview"><h3>${escapeHtml(t("model3d"))}</h3>${flashcardModel3d(card.languageCode, card.text)}</div>
-      <div class="inspector-preview"><h3>${escapeHtml(t("front2d"))}</h3>${singleFlashcardSvg(pos, card.languageCode, card.text)}</div>
-      <div class="inspector-preview"><h3>${escapeHtml(t("side"))}</h3>${sideProfileSvg()}</div>
+    <div class="inspector-layout">
+      <div class="inspector-left">
+        <div class="inspector-grid">
+          <div class="inspector-preview inspector-main-preview"><h3>${escapeHtml(t("model3d"))}</h3>${flashcardModel3d(card.languageCode, card.text, pos, { overrides: { [card.languageCode]: card.overrides || {} } })}</div>
+          <div class="inspector-preview"><h3>${escapeHtml(t("front2d"))}</h3>${singleFlashcardSvg(pos, card.languageCode, card.text, { overrides: { [card.languageCode]: card.overrides || {} } })}</div>
+          <div class="inspector-preview"><h3>${escapeHtml(t("side"))}</h3>${sideProfileSvg(pos.width)}</div>
+        </div>
+      </div>
+      <div class="inspector-right">
+        ${dimensionTable([
+          ["Card", `${fmt(pos.width)} x ${fmt(pos.height)} mm`],
+          ["Base thickness", `${fmt(numberValue("thickness", 2))} mm`],
+          ["Total height", `${fmt(totalModelHeight())} mm`],
+          ["Fitted font", `${fmt(fit.fontSize)} mm`],
+          ["Semantic ID", String(card.wordId).padStart(3, "0")],
+          ["Language", languageShort(card.languageCode)],
+        ])}
+        ${inspectorEditorControls([{ wordId: card.wordId, language: card.languageCode, label: card.text }])}
+      </div>
     </div>
-    ${dimensionTable([
-      ["Card", `${fmt(pos.width)} x ${fmt(pos.height)} mm`],
-      ["Base thickness", `${fmt(numberValue("thickness", 2))} mm`],
-      ["Total height", `${fmt(totalModelHeight())} mm`],
-      ["Fitted font", `${fmt(fit.fontSize)} mm`],
-      ["Semantic ID", String(card.wordId).padStart(3, "0")],
-      ["Language", languageShort(card.languageCode)],
-    ])}
-    ${inspectorScaleControls(card.languageCode)}
   `;
   $("cardInspector").hidden = false;
+  bindInspectorModelDrag();
 }
 
-function inspectFit(language, text, maxWidth, maxHeight, cardWidth, cardHeight) {
-  return fitTextLines(language, text, maxWidth, maxHeight, cardWidth, cardHeight);
+function inspectFit(language, text, maxWidth, maxHeight, cardWidth, cardHeight, overrides = null) {
+  return fitTextLines(language, text, maxWidth, maxHeight, cardWidth, cardHeight, overrides);
 }
 
 function dimensionTable(rows) {
   return `<table class="dimension-table"><tbody>${rows.map(([key, value]) => `<tr><th>${escapeHtml(key)}</th><td>${escapeHtml(value)}</td></tr>`).join("")}</tbody></table>`;
 }
 
-function inspectorScaleControls(...languages) {
-  const unique = Array.from(new Set(languages.filter(Boolean)));
-  return `<div class="inspector-controls">${unique
-    .map((language) => {
-      const id = scaleInputId(language);
-      return id ? `<label>${languageShort(language)} ${escapeHtml(t("scale"))} <input type="range" min="0.5" max="1.8" step="0.05" value="${$(id).value}" oninput="inspectorScaleChanged('${id}', this.value)" /></label>` : "";
+function inspectorEditorControls(refs) {
+  const unique = [];
+  const seen = new Set();
+  for (const ref of refs.filter((item) => item?.wordId && item?.language)) {
+    const key = `${ref.wordId}:${ref.language}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(ref);
+  }
+  return `<div class="inspector-controls inspector-edit-controls">${unique
+    .map((ref) => {
+      const word = words.find((item) => item.index === Number(ref.wordId));
+      if (!word) return "";
+      const override = wordOverride(word, ref.language);
+      const scale = override.scale ?? 1;
+      const lineChars = override.lineChars ?? (lineCharSettings()[ref.language] || "");
+      const maxLines = override.maxLines ?? defaultMaxLines(ref.language);
+      const text = wordText(word, ref.language);
+      const title = `${languageShort(ref.language)} ${String(ref.wordId).padStart(3, "0")}`;
+      const wrapControls = WRAPPABLE_LANGUAGES.includes(ref.language)
+        ? `
+          <label>${uiLanguage === "ru" ? "симв./стр." : "chars/line"} <input type="number" min="2" step="1" value="${escapeAttr(lineChars)}" oninput="inspectorOverrideChanged(${Number(ref.wordId)}, '${escapeAttr(ref.language)}', 'lineChars', this.value)" /></label>
+          <label>${uiLanguage === "ru" ? "строк" : "lines"} <input type="number" min="1" max="8" step="1" value="${escapeAttr(maxLines)}" oninput="inspectorOverrideChanged(${Number(ref.wordId)}, '${escapeAttr(ref.language)}', 'maxLines', this.value)" /></label>
+        `
+        : "";
+      return `
+        <section class="inspector-edit-card">
+          <div class="inspector-edit-title">${escapeHtml(title)}<span>${escapeHtml(ref.label || "")}</span></div>
+          <label>${uiLanguage === "ru" ? "текст" : "text"} <textarea oninput="inspectorTextChanged(${Number(ref.wordId)}, '${escapeAttr(ref.language)}', this.value)">${escapeHtml(text)}</textarea></label>
+          <label>${escapeHtml(t("scale"))} <input type="range" min="0.45" max="1.8" step="0.05" value="${escapeAttr(scale)}" oninput="inspectorOverrideChanged(${Number(ref.wordId)}, '${escapeAttr(ref.language)}', 'scale', this.value)" /></label>
+          ${wrapControls}
+          <div class="inspector-edit-actions">
+            <button type="button" onclick="inspectorUseOriginal(${Number(ref.wordId)}, '${escapeAttr(ref.language)}')">${uiLanguage === "ru" ? "Оригинал" : "Original"}</button>
+            <button type="button" onclick="inspectorUseRecommended(${Number(ref.wordId)}, '${escapeAttr(ref.language)}')">${uiLanguage === "ru" ? "Рекоменд." : "Recommended"}</button>
+            <button type="button" onclick="inspectorResetOverrides(${Number(ref.wordId)}, '${escapeAttr(ref.language)}')">${uiLanguage === "ru" ? "Сброс настроек" : "Reset settings"}</button>
+          </div>
+        </section>
+      `;
     })
     .join("")}</div>`;
 }
 
-function inspectorScaleChanged(id, value) {
-  if (!$(id)) return;
-  $(id).value = value;
+function inspectorTextChanged(wordId, language, value) {
+  const row = words.findIndex((item) => item.index === Number(wordId));
+  if (row < 0) return;
+  if (language === "chinese" && !words[row]._confirmedChineseInspectorEdit && value !== wordText(words[row], language)) {
+    if (!confirmDanger(uiLanguage === "ru" ? "Изменить китайский текст в словаре? Это повлияет на preview и экспорт." : "Change Chinese dictionary text? This affects preview and export.")) {
+      rerenderActiveInspector();
+      return;
+    }
+    words[row]._confirmedChineseInspectorEdit = true;
+  }
+  setWordText(row, language, value, true);
+  applyTextToLatestLayout(Number(wordId), language);
+  afterInspectorEdit({ rerender: true });
+}
+
+function inspectorOverrideChanged(wordId, language, key, value) {
+  const row = words.findIndex((item) => item.index === Number(wordId));
+  if (row < 0) return;
+  setWordOverride(row, language, key, value);
+  applyOverrideToLatestLayout(Number(wordId), language);
+  afterInspectorEdit({ rerender: true });
+}
+
+function inspectorUseOriginal(wordId, language) {
+  const row = words.findIndex((item) => item.index === Number(wordId));
+  if (row < 0) return;
+  pushUndoSnapshot("use-original");
+  setWordText(row, language, originalWordText(Number(wordId), language), true);
+  applyTextToLatestLayout(Number(wordId), language);
+  afterInspectorEdit({ rerender: true, immediate: true });
+}
+
+function inspectorUseRecommended(wordId, language) {
+  const row = words.findIndex((item) => item.index === Number(wordId));
+  if (row < 0) return;
+  pushUndoSnapshot("use-recommended");
+  setWordText(row, language, recommendedWordText(words[row], language), true);
+  applyTextToLatestLayout(Number(wordId), language);
+  afterInspectorEdit({ rerender: true, immediate: true });
+}
+
+function inspectorResetOverrides(wordId, language) {
+  const row = words.findIndex((item) => item.index === Number(wordId));
+  if (row < 0) return;
+  pushUndoSnapshot("reset-overrides");
+  const overrides = normalizeWordOverrides(words[row].overrides);
+  delete overrides[language];
+  words[row].overrides = overrides;
+  autoSaveDatasetCorrections();
+  applyOverrideToLatestLayout(Number(wordId), language);
+  afterInspectorEdit({ rerender: true, immediate: true });
+}
+
+function afterInspectorEdit({ rerender = false, immediate = false } = {}) {
+  autoSaveDatasetCorrections();
   saveLocal();
   renderPlates();
-  rerenderActiveInspector();
+  renderTable();
+  if (rerender) scheduleInspectorRerender(immediate ? 0 : 140);
   schedulePreview();
 }
 
-function scaleInputId(language) {
-  return { chinese: "chineseTextScale", pinyin: "pinyinTextScale", english: "englishTextScale", target: "targetTextScale", hungarian: "hungarianTextScale" }[language];
+function scheduleInspectorRerender(delay = 350) {
+  clearTimeout(inspectorRerenderTimer);
+  inspectorRerenderTimer = setTimeout(rerenderActiveInspector, delay);
 }
 
-function dominoModel3d(tile) {
+function applyOverrideToLatestLayout(wordId, language) {
+  if (!latestLayout?.cards) return;
+  const word = words.find((item) => item.index === Number(wordId));
+  const override = wordOverride(word, language);
+  latestLayout.cards.forEach((card) => {
+    if (card.wordId === wordId && card.languageCode === language) card.overrides = override;
+    if (card.left?.wordId === wordId && card.left?.languageCode === language) card.left.overrides = override;
+    if (card.right?.wordId === wordId && card.right?.languageCode === language) card.right.overrides = override;
+  });
+}
+
+function applyTextToLatestLayout(wordId, language) {
+  if (!latestLayout?.cards) return;
+  const word = words.find((item) => item.index === Number(wordId));
+  if (!word) return;
+  const text = wordText(word, language) || "?";
+  latestLayout.cards.forEach((card) => {
+    if (card.wordId === wordId && card.languageCode === language) card.text = text;
+    if (card.left?.wordId === wordId && card.left?.languageCode === language) card.left.text = text;
+    if (card.right?.wordId === wordId && card.right?.languageCode === language) card.right.text = text;
+  });
+}
+
+function bindInspectorModelDrag() {
+  const model = $("inspectorBody")?.querySelector(".model3d");
+  if (!model) return;
+  setModelRotation(model);
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let startRotation = { ...modelRotation };
+  model.addEventListener("pointerdown", (event) => {
+    dragging = true;
+    startX = event.clientX;
+    startY = event.clientY;
+    startRotation = { ...modelRotation };
+    model.classList.add("dragging");
+    model.setPointerCapture(event.pointerId);
+  });
+  model.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    modelRotation = {
+      x: Math.max(-82, Math.min(82, startRotation.x - (event.clientY - startY) * 0.35)),
+      z: startRotation.z + (event.clientX - startX) * 0.35,
+    };
+    setModelRotation(model);
+  });
+  const stop = (event) => {
+    if (!dragging) return;
+    dragging = false;
+    model.classList.remove("dragging");
+    try {
+      model.releasePointerCapture(event.pointerId);
+    } catch {
+      // Pointer may already be released by the browser.
+    }
+  };
+  model.addEventListener("pointerup", stop);
+  model.addEventListener("pointercancel", stop);
+  model.addEventListener("dblclick", () => {
+    modelRotation = { x: 58, z: -28 };
+    setModelRotation(model);
+  });
+}
+
+function setModelRotation(model) {
+  model.style.setProperty("--model-rx", `${modelRotation.x}deg`);
+  model.style.setProperty("--model-rz", `${modelRotation.z}deg`);
+}
+
+function dominoModel3d(tile, pos) {
   const colors = roleColors();
-  const left = escapeHtml(tile.left?.text || "?");
-  const right = escapeHtml(tile.right?.text || "?");
+  const leftFit = fitTextLines(tile.left?.languageCode, tile.left?.text || "?", pos.width * 0.39, pos.height * 0.64, pos.width, pos.height, tile.left?.overrides);
+  const rightFit = fitTextLines(tile.right?.languageCode, tile.right?.text || "?", pos.width * 0.39, pos.height * 0.64, pos.width, pos.height, tile.right?.overrides);
+  const cssScale = modelCssScale(pos.width, pos.height);
+  const left = model3dTextHtml(leftFit.lines);
+  const right = model3dTextHtml(rightFit.lines);
   const doubleClass = tile.tileType === "double" ? " is-double" : "";
   return `
     <div class="model3d-wrap">
-      <div class="model3d${doubleClass}" style="${model3dStyle()}">
-        <div class="model3d-bottom">${String(tile.backIds?.[0] || 0).padStart(2, "0")} | ${String(tile.backIds?.[1] || 0).padStart(2, "0")}</div>
-        <div class="model3d-side"></div>
-        <div class="model3d-top" style="background:${escapeAttr(colors.base)}; border-color:${escapeAttr(colors.border)}">
-          <span class="model3d-text left">${left}</span>
+      <div class="model3d-hint">${uiLanguage === "ru" ? "тащите мышью, двойной клик - сброс" : "drag to rotate, double-click to reset"}</div>
+      <div class="model3d${doubleClass}" style="${model3dStyle(pos.width, pos.height)}">
+        <div class="model3d-face model3d-bottom">${String(tile.backIds?.[0] || 0).padStart(2, "0")} | ${String(tile.backIds?.[1] || 0).padStart(2, "0")}</div>
+        ${model3dSides()}
+        <div class="model3d-face model3d-top" style="background:${escapeAttr(colors.base)}">
+          <span class="model3d-border-rail" style="border-color:${escapeAttr(colors.border)}"></span>
+          <span class="model3d-text model3d-raised left" style="font-size:${Math.max(12, leftFit.fontSize * cssScale)}px">${left}</span>
           <span class="model3d-divider" style="background:${escapeAttr(colors.divider)}"></span>
-          <span class="model3d-text right">${right}</span>
+          <span class="model3d-text model3d-raised right" style="font-size:${Math.max(12, rightFit.fontSize * cssScale)}px">${right}</span>
         </div>
       </div>
-      <div class="model3d-label">${fmt(numberValue("cardWidth", 60))} x ${fmt(numberValue("cardHeight", 30))} x ${fmt(numberValue("thickness", 2.2))} mm base</div>
+      <div class="model3d-label">${fmt(pos.width)} x ${fmt(pos.height)} x ${fmt(numberValue("thickness", 2.2))} mm base</div>
     </div>
   `;
 }
 
-function flashcardModel3d(language, text) {
+function flashcardModel3d(language, text, pos, word = null) {
   const colors = roleColors();
-  const lines = fitTextLines(language, text || "?", numberValue("cardWidth", 30) * 0.72, numberValue("cardHeight", 30) * 0.68, numberValue("cardWidth", 30), numberValue("cardHeight", 30)).lines;
+  const fit = fitTextLines(language, text || "?", pos.width * 0.72, pos.height * 0.68, pos.width, pos.height, word ? wordOverride(word, language) : null);
+  const cssScale = modelCssScale(pos.width, pos.height);
   return `
     <div class="model3d-wrap">
-      <div class="model3d" style="${model3dStyle()}">
-        <div class="model3d-bottom">${uiLanguage === "ru" ? "номер снизу" : "underside ID"}</div>
-        <div class="model3d-side"></div>
-        <div class="model3d-top" style="background:${escapeAttr(colors.base)}; border-color:${escapeAttr(colors.border)}">
-          <span class="model3d-text single">${lines.map(escapeHtml).join("<br />")}</span>
+      <div class="model3d-hint">${uiLanguage === "ru" ? "тащите мышью, двойной клик - сброс" : "drag to rotate, double-click to reset"}</div>
+      <div class="model3d" style="${model3dStyle(pos.width, pos.height)}">
+        <div class="model3d-face model3d-bottom">${uiLanguage === "ru" ? "номер снизу" : "underside ID"}</div>
+        ${model3dSides()}
+        <div class="model3d-face model3d-top" style="background:${escapeAttr(plateBaseColor(language))}">
+          <span class="model3d-border-rail" style="border-color:${escapeAttr(colors.border)}"></span>
+          ${model3dHanziGuide(language, text)}
+          <span class="model3d-text model3d-raised single" style="font-size:${Math.max(14, fit.fontSize * cssScale)}px">${model3dTextHtml(fit.lines)}</span>
         </div>
       </div>
-      <div class="model3d-label">${fmt(numberValue("cardWidth", 30))} x ${fmt(numberValue("cardHeight", 30))} x ${fmt(numberValue("thickness", 2))} mm base</div>
+      <div class="model3d-label">${fmt(pos.width)} x ${fmt(pos.height)} x ${fmt(numberValue("thickness", 2))} mm base</div>
     </div>
   `;
 }
 
-function model3dStyle() {
-  const width = Math.min(340, Math.max(180, numberValue("cardWidth", 30) * 5));
-  const height = Math.min(220, Math.max(110, numberValue("cardHeight", 30) * 4));
+function model3dStyle(widthMm, heightMm) {
+  const { width, height } = modelCssSize(widthMm, heightMm);
   const thick = Math.max(10, numberValue("thickness", 2) * 7);
   const raised = Math.max(3, Math.max(numberValue("textHeight", 0.55), numberValue("borderHeight", 0.45)) * 10);
-  return `--model-w:${width}px;--model-h:${height}px;--model-thick:${thick}px;--model-raised:${raised}px;`;
+  const borderPx = Math.max(3, numberValue("borderWidth", 1) * modelCssScale(widthMm, heightMm));
+  return `--model-w:${width}px;--model-h:${height}px;--model-thick:${thick}px;--model-raised:${raised}px;--model-border:${borderPx}px;--model-rx:${modelRotation.x}deg;--model-rz:${modelRotation.z}deg;`;
+}
+
+function modelCssSize(widthMm, heightMm) {
+  const maxW = 360;
+  const maxH = 230;
+  const minW = 150;
+  const minH = 95;
+  const scale = Math.min(maxW / Math.max(1, widthMm), maxH / Math.max(1, heightMm));
+  return {
+    width: Math.max(minW, widthMm * scale),
+    height: Math.max(minH, heightMm * scale),
+  };
+}
+
+function modelCssScale(widthMm, heightMm) {
+  return modelCssSize(widthMm, heightMm).width / Math.max(1, widthMm);
+}
+
+function model3dSides() {
+  return `
+    <div class="model3d-face model3d-side model3d-side-front"></div>
+    <div class="model3d-face model3d-side model3d-side-back"></div>
+    <div class="model3d-face model3d-side model3d-side-left"></div>
+    <div class="model3d-face model3d-side model3d-side-right"></div>
+  `;
+}
+
+function model3dTextHtml(lines) {
+  return (lines || ["?"]).map(escapeHtml).join("<br />");
+}
+
+function model3dHanziGuide(language, text) {
+  if (language !== "chinese" || $("hanziGuide").value === "none") return "";
+  const chars = cjkChars(text);
+  const count = chars.length || 1;
+  if (count > 3) return "";
+  const inset = 12;
+  const usable = 100 - inset * 2;
+  const cellWidth = usable / count;
+  const mode = $("hanziGuide").value;
+  const cells = Array.from({ length: count }, (_, index) => {
+    const left = inset + index * cellWidth;
+    return `
+      <span class="model3d-hanzi-cell" style="left:${left}%;top:${inset}%;width:${cellWidth}%;height:${usable}%">
+        <span class="model3d-hanzi-line vertical"></span>
+        <span class="model3d-hanzi-line horizontal"></span>
+        ${mode === "mi_8" ? `<span class="model3d-hanzi-line diag-a"></span><span class="model3d-hanzi-line diag-b"></span>` : ""}
+      </span>
+    `;
+  }).join("");
+  return `<span class="model3d-hanzi-guide">${cells}</span>`;
 }
 
 function singleDominoSvg(tile, pos) {
@@ -1354,13 +1995,12 @@ function singleDominoSvg(tile, pos) {
   return svg;
 }
 
-function singleFlashcardSvg(pos, language, text) {
+function singleFlashcardSvg(pos, language, text, word = null) {
   const local = { ...pos, x: 4, y: 4 };
-  return `<svg class="inspector-svg" viewBox="0 0 ${pos.width + 8} ${pos.height + 12}"><rect x="4" y="4" width="${pos.width}" height="${pos.height}" rx="${previewCornerRadius(pos)}" fill="${roleColors().base}" stroke="${roleColors().border}" stroke-width="1.3" />${language === "chinese" ? guideSvg(local) : ""}${cardTextSvg(local, language, text)}</svg>`;
+  return `<svg class="inspector-svg" viewBox="0 0 ${pos.width + 8} ${pos.height + 12}"><rect x="4" y="4" width="${pos.width}" height="${pos.height}" rx="${previewCornerRadius(pos)}" fill="${plateBaseColor(language)}" stroke="${roleColors().border}" stroke-width="1.3" />${language === "chinese" ? guideSvg(local) : ""}${cardTextSvg(local, language, text, word ? wordOverride(word, language) : null)}</svg>`;
 }
 
-function sideProfileSvg() {
-  const width = numberValue("cardWidth", 30);
+function sideProfileSvg(width = numberValue("cardWidth", 30)) {
   const base = numberValue("thickness", 2);
   const total = totalModelHeight();
   const scale = 5;
@@ -1395,8 +2035,8 @@ function backNumberSvg(pos, number) {
   return `<text x="${x}" y="${y}" text-anchor="middle" font-size="7" font-weight="700" fill="#777">${number}</text>`;
 }
 
-function cardTextSvg(pos, language, text) {
-  const layout = fitTextLines(language, text, pos.width - scaledInset(pos) * 2.4, pos.height - scaledInset(pos) * 3.2, pos.width, pos.height);
+function cardTextSvg(pos, language, text, overrides = null) {
+  const layout = fitTextLines(language, text, pos.width - scaledInset(pos) * 2.4, pos.height - scaledInset(pos) * 3.2, pos.width, pos.height, overrides);
   const x = pos.x + pos.width / 2;
   if (language === "chinese") {
     const chars = cjkChars(text);
@@ -1405,7 +2045,7 @@ function cardTextSvg(pos, language, text) {
       return chars
         .map((char, index) => {
           const cell = cells[index];
-          const cellLayout = fitTextLines(language, char, cell.width * 0.86, cell.height * 0.82, pos.width, pos.height);
+          const cellLayout = fitTextLines(language, char, cell.width * 0.86, cell.height * 0.82, pos.width, pos.height, overrides);
           return `<text x="${cell.x + cell.width / 2}" y="${cell.y + cell.height / 2}" text-anchor="middle" dominant-baseline="central" font-size="${cellLayout.fontSize}" font-weight="700" fill="#111">${escapeHtml(char)}</text>`;
         })
         .join("");
@@ -1421,18 +2061,24 @@ function cardTextSvg(pos, language, text) {
   return `<text text-anchor="middle" font-size="${layout.fontSize}" font-weight="700" fill="#111">${tspans}</text>`;
 }
 
-function fitTextLines(language, rawText, maxWidth, maxHeight, cardWidth = 30, cardHeight = 30) {
-  const text = String(rawText || "?").trim();
-  const scale = previewTextScale(language);
+function fitTextLines(language, rawText, maxWidth, maxHeight, cardWidth = 30, cardHeight = 30, overrides = null) {
+  const text = wrapByLanguageLineLimit(language, String(rawText || "?").trim(), overrides);
+  const globalScale = previewTextScale(language);
+  const localScale = overrideNumber(overrides, "scale", 1);
+  const scale = globalScale * localScale;
   const cardScale = Math.max(0.35, Math.min(cardWidth, cardHeight) / 30);
   if (language === "chinese") {
-    let size = (text.length > 2 ? 8.8 : text.length > 1 ? 10.8 : 15) * scale * cardScale;
+    const preferred = (text.length > 2 ? 8.8 : text.length > 1 ? 10.8 : 15) * globalScale * cardScale;
     const maxInkWidth = maxWidth / Math.max(1, text.length * 0.92);
-    size = Math.min(size, maxInkWidth, maxHeight * 0.82);
+    const maxFit = Math.min(maxInkWidth, maxHeight * 0.82);
+    let size = Math.min(preferred, maxFit * 0.88) * localScale;
+    size = Math.min(size, maxFit * 1.08);
+    size = Math.max(2, size);
     return { lines: [text], fontSize: Number(size.toFixed(2)) };
   }
 
-  const maxLines = language === "pinyin" ? 2 : 3;
+  const explicitLines = Math.max(1, text.split("\n").length);
+  const maxLines = Math.max(explicitLines, overrideInt(overrides, "maxLines", language === "pinyin" ? 2 : 3));
   const startSize = (language === "pinyin" ? 8.2 : 6.8) * scale * cardScale;
   const minSize = (language === "pinyin" ? 4.4 : 3.2) * Math.min(1, cardScale);
   for (let size = startSize; size >= minSize; size -= 0.2) {
@@ -1446,11 +2092,83 @@ function fitTextLines(language, rawText, maxWidth, maxHeight, cardWidth = 30, ca
   return { lines: wrapText(text, maxWidth, minSize, maxLines), fontSize: minSize };
 }
 
+function wrapByLanguageLineLimit(language, text, overrides = null) {
+  const limit = overrideInt(overrides, "lineChars", lineCharSettings()[language]);
+  if (!limit || language === "chinese") return text;
+  return wrapHardLines(text, Math.max(2, Number(limit) || 0));
+}
+
+function defaultMaxLines(language) {
+  return language === "pinyin" ? 2 : 3;
+}
+
+function overrideNumber(overrides, key, fallback) {
+  if (!overrides || overrides[key] === undefined || overrides[key] === "") return fallback;
+  return Number(overrides[key]) || fallback;
+}
+
+function overrideInt(overrides, key, fallback) {
+  if (!overrides || overrides[key] === undefined || overrides[key] === "") return fallback;
+  return Math.max(1, Number(overrides[key]) || fallback);
+}
+
+function wrapHardLines(text, maxChars) {
+  const limit = Math.max(2, Number(maxChars) || 0);
+  if (!limit) return String(text || "");
+  return String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => wrapHardLine(line, limit))
+    .join("\n");
+}
+
+function wrapHardLine(line, limit) {
+  const normalized = String(line || "").replace(/\s*\/\s*/g, " / ").trim();
+  if (!normalized) return "";
+  const tokens = normalized.split(/[ \t]+/).filter(Boolean);
+  const lines = [];
+  let current = "";
+  for (const token of tokens) {
+    const chunks = splitTokenByChars(token, limit);
+    for (const chunk of chunks) {
+      const next = current ? `${current} ${chunk}` : chunk;
+      if (Array.from(next).length <= limit || !current) {
+        current = next;
+      } else {
+        lines.push(current);
+        current = chunk;
+      }
+    }
+  }
+  if (current) lines.push(current);
+  return lines.join("\n");
+}
+
+function splitTokenByChars(token, limit) {
+  const chars = Array.from(String(token || ""));
+  if (chars.length <= limit) return [token];
+  const chunks = [];
+  for (let i = 0; i < chars.length; i += limit) {
+    chunks.push(chars.slice(i, i + limit).join(""));
+  }
+  return chunks;
+}
+
 function wrapText(text, maxWidth, fontSize, maxLines) {
   const tokens = tokenizeText(text);
   const lines = [];
   let current = "";
   for (const token of tokens) {
+    if (token === "\n") {
+      if (current) {
+        lines.push(current);
+        current = "";
+      } else if (lines.length) {
+        lines.push("");
+      }
+      continue;
+    }
     const next = current ? `${current} ${token}` : token;
     if (estimatedTextWidth(next, fontSize) <= maxWidth || !current) {
       current = next;
@@ -1469,11 +2187,16 @@ function wrapText(text, maxWidth, fontSize, maxLines) {
 }
 
 function tokenizeText(text) {
-  return String(text || "")
-    .replace(/\s*\/\s*/g, " / ")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
+  const tokens = [];
+  String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .forEach((line, index) => {
+      if (index) tokens.push("\n");
+      tokens.push(...line.replace(/\s*\/\s*/g, " / ").trim().split(/[ \t]+/).filter(Boolean));
+    });
+  return tokens;
 }
 
 function estimatedTextWidth(text, fontSize) {
@@ -1590,6 +2313,7 @@ function applyDatasetCorrections(sourceWords, datasetId) {
     return {
       ...word,
       ...Object.fromEntries(["chinese", "pinyin", "english", "target", "hungarian"].filter((field) => patch[field] !== undefined).map((field) => [field, patch[field]])),
+      overrides: normalizeWordOverrides(patch.overrides ?? word.overrides),
       lockedFields: Array.from(new Set([...(word.lockedFields || []), ...(patch.lockedFields || [])])),
     };
   });
@@ -1616,6 +2340,11 @@ function buildDatasetCorrectionSet() {
       patch.lockedFields = lockedFields;
       changed = true;
     }
+    const overrides = normalizeWordOverrides(word.overrides);
+    if (Object.keys(overrides).length) {
+      patch.overrides = overrides;
+      changed = true;
+    }
     if (changed) entries[String(word.index)] = patch;
   }
   return {
@@ -1637,6 +2366,17 @@ function saveDatasetCorrections() {
   else delete all[activeDatasetId];
   persistAllCorrections(all);
   renderCorrectionsStatus();
+}
+
+function autoSaveDatasetCorrections() {
+  clearTimeout(correctionsSaveTimer);
+  correctionsSaveTimer = setTimeout(() => {
+    if (activeDatasetId === "custom") {
+      saveLocal();
+      return;
+    }
+    saveDatasetCorrections();
+  }, 350);
 }
 
 function exportDatasetCorrections() {
@@ -1684,10 +2424,16 @@ function importDatasetCorrections(payload) {
 }
 
 function clearDatasetCorrections() {
+  if (!confirmDanger(uiLanguage === "ru"
+    ? "Очистить сохранённые правки и загрузить оригинал текущего набора?"
+    : "Clear saved edits and load the original version of this set?")) {
+    return;
+  }
+  pushUndoSnapshot("clear-corrections");
   const all = loadAllCorrections();
   delete all[activeDatasetId];
   persistAllCorrections(all);
-  renderCorrectionsStatus();
+  loadDataset(activeDatasetId, { ignoreCorrections: true });
 }
 
 function renderCorrectionsStatus() {
@@ -1699,6 +2445,13 @@ function renderCorrectionsStatus() {
 function setCorrectionsStatus(message) {
   const node = $("correctionsStatus");
   if (node) node.textContent = message || "";
+}
+
+function migrateLegacyUiSettings() {
+  if ($("extraLanguagePreset")?.value === "hungarian") {
+    $("extraLanguagePreset").value = "custom";
+    $("extraLanguageLabel").value = "";
+  }
 }
 
 function loadPresets() {
@@ -1744,6 +2497,9 @@ async function loadSelectedPreset() {
 
 function deleteSelectedPreset() {
   const id = $("presetSelect").value;
+  const preset = presets.find((item) => item.id === id);
+  if (!preset) return;
+  if (!confirmDanger(uiLanguage === "ru" ? `Удалить пресет "${preset.name}"?` : `Delete preset "${preset.name}"?`)) return;
   presets = presets.filter((item) => item.id !== id || item.builtin);
   persistPresets();
   renderPresetSelect();
@@ -1752,7 +2508,15 @@ function deleteSelectedPreset() {
 function defaultPresets() {
   const base = {
     printer: { id: "bambu-a1-mini", name: "Bambu Lab A1 mini", widthMm: 180, depthMm: 180, marginMm: 0 },
-    ui: { extraLanguagePreset: "hungarian", extraLanguageLabel: "Hungarian", maxChars: { english: 18, target: 18, hungarian: 18 }, modules: {} },
+    ui: {
+      extraLanguagePreset: "custom",
+      extraLanguageLabel: "",
+      maxChars: { english: 18, target: 18, hungarian: 18 },
+      lineChars: { pinyin: 12, english: 10, target: 10, hungarian: 11 },
+      maxWordChars: { english: 10, target: 10, hungarian: 10 },
+      selectedLanguages: ["chinese", "pinyin", "english", "target", "hungarian"],
+      modules: {},
+    },
     plateLabel: defaultPlateLabel(),
     printProfile: defaultPrintProfile(),
     simulator: defaultSimulator(),
@@ -1815,6 +2579,11 @@ function defaultDesign(overrides = {}) {
     targetTextScale: 1,
     hungarianTextScale: 1,
     hanziGuideScale: 1,
+    textRenderMode: "raster_blocks",
+    pinyinLineChars: 12,
+    englishLineChars: 10,
+    targetLineChars: 10,
+    hungarianLineChars: 11,
     ...overrides,
   };
 }
@@ -1855,6 +2624,13 @@ function defaultColors() {
       divider: "#f2b600",
       doubleMarker: "#d9a000",
       hanziGuide: "#dd3b2a",
+    },
+    languages: {
+      chinese: "#ffffff",
+      pinyin: "#eef6ff",
+      english: "#eefbea",
+      target: "#fff1f1",
+      hungarian: "#fff6e8",
     },
   };
 }
@@ -1908,6 +2684,11 @@ function applySavedRequest(request) {
   $("targetTextScale").value = design.targetTextScale ?? 1;
   $("hungarianTextScale").value = design.hungarianTextScale ?? 1;
   $("hanziGuideScale").value = design.hanziGuideScale ?? 1;
+  $("textRenderMode").value = design.textRenderMode ?? "raster_blocks";
+  $("pinyinLineChars").value = design.pinyinLineChars ?? ui.lineChars?.pinyin ?? 12;
+  $("englishLineChars").value = design.englishLineChars ?? ui.lineChars?.english ?? 10;
+  $("targetLineChars").value = design.targetLineChars ?? ui.lineChars?.target ?? 10;
+  $("hungarianLineChars").value = design.hungarianLineChars ?? ui.lineChars?.hungarian ?? 11;
   $("hanziGuide").value = design.hanziGuideMode ?? "tian_4";
   $("backMode").value = design.backNumberMode ?? "deboss";
   $("dominoDensity").value = domino.density ?? "compact";
@@ -1933,11 +2714,26 @@ function applySavedRequest(request) {
   $("colorDivider").value = colors.divider ?? "#f2b600";
   $("colorDoubleMarker").value = colors.doubleMarker ?? "#d9a000";
   $("colorHanziGuide").value = colors.hanziGuide ?? "#dd3b2a";
-  $("extraLanguagePreset").value = ui.extraLanguagePreset ?? "hungarian";
-  $("extraLanguageLabel").value = ui.extraLanguageLabel || presetLanguageLabel($("extraLanguagePreset").value);
+  const languageColorsSaved = request.colors?.languages || {};
+  $("colorChinesePlate").value = languageColorsSaved.chinese ?? "#ffffff";
+  $("colorPinyinPlate").value = languageColorsSaved.pinyin ?? "#eef6ff";
+  $("colorEnglishPlate").value = languageColorsSaved.english ?? "#eefbea";
+  $("colorTargetPlate").value = languageColorsSaved.target ?? "#fff1f1";
+  $("colorHungarianPlate").value = languageColorsSaved.hungarian ?? "#fff6e8";
+  $("extraLanguagePreset").value = ui.extraLanguagePreset ?? "custom";
+  $("extraLanguageLabel").value = ui.extraLanguageLabel ?? "";
+  migrateLegacyUiSettings();
   $("englishMaxChars").value = ui.maxChars?.english ?? 18;
   $("targetMaxChars").value = ui.maxChars?.target ?? 18;
   $("hungarianMaxChars").value = ui.maxChars?.hungarian ?? 18;
+  $("pinyinLineChars").value = design.pinyinLineChars ?? ui.lineChars?.pinyin ?? $("pinyinLineChars").value;
+  $("englishLineChars").value = design.englishLineChars ?? ui.lineChars?.english ?? $("englishLineChars").value;
+  $("targetLineChars").value = design.targetLineChars ?? ui.lineChars?.target ?? $("targetLineChars").value;
+  $("hungarianLineChars").value = design.hungarianLineChars ?? ui.lineChars?.hungarian ?? $("hungarianLineChars").value;
+  $("englishMaxWordChars").value = ui.maxWordChars?.english ?? 10;
+  $("targetMaxWordChars").value = ui.maxWordChars?.target ?? 10;
+  $("hungarianMaxWordChars").value = ui.maxWordChars?.hungarian ?? 10;
+  setSelectedLanguages(ui.selectedLanguages || ["chinese", "pinyin", "english", "target", "hungarian"]);
   applyModuleState(ui.modules);
 }
 
@@ -1963,12 +2759,17 @@ function previewTextScale(language) {
 
 function parseLanguageOrder() {
   const allowed = new Set(activeLanguages().map(([id]) => id));
+  const aliases = { russian: "target", ru: "target", hu: "hungarian", magyar: "hungarian", english: "english", chinese: "chinese", hanzi: "chinese", pinyin: "pinyin" };
   const result = $("languageOrder")
     .value.split(/[,\s>]+/)
     .map((item) => item.trim())
+    .map((item) => aliases[item.toLowerCase()] || item)
     .filter(Boolean)
     .filter((item, index, all) => allowed.has(item) && all.indexOf(item) === index);
-  return result.length >= 2 ? result : ["chinese", "pinyin"];
+  const fallback = selectedLanguageIds();
+  const normalized = result.length >= 2 ? result : fallback.slice(0, Math.max(2, fallback.length));
+  $("languageOrder").value = normalized.join(",");
+  return normalized;
 }
 
 function roleColors() {
@@ -1980,6 +2781,20 @@ function roleColors() {
     doubleMarker: $("colorDoubleMarker")?.value || "#d9a000",
     hanziGuide: $("colorHanziGuide")?.value || "#dd3b2a",
   };
+}
+
+function languageColors() {
+  return {
+    chinese: $("colorChinesePlate")?.value || "#ffffff",
+    pinyin: $("colorPinyinPlate")?.value || "#eef6ff",
+    english: $("colorEnglishPlate")?.value || "#eefbea",
+    target: $("colorTargetPlate")?.value || "#fff1f1",
+    hungarian: $("colorHungarianPlate")?.value || "#fff6e8",
+  };
+}
+
+function plateBaseColor(language) {
+  return languageColors()[language] || roleColors().base;
 }
 
 function normalizeWords(rawWords) {
@@ -1997,9 +2812,25 @@ function normalizeWords(rawWords) {
       target: word.target ?? word.russian ?? word.ru ?? original.target,
       hungarian: word.hungarian ?? word.hu ?? word.extra ?? original.hungarian,
       original,
+      overrides: normalizeWordOverrides(word.overrides),
       lockedFields: word.lockedFields || [],
     };
   });
+}
+
+function normalizeWordOverrides(overrides) {
+  const normalized = {};
+  if (!overrides || typeof overrides !== "object") return normalized;
+  for (const language of OVERRIDE_LANGUAGES) {
+    const raw = overrides[language];
+    if (!raw || typeof raw !== "object") continue;
+    const next = {};
+    if (raw.scale !== undefined && raw.scale !== "") next.scale = clamp(Number(raw.scale) || 1, 0.2, 3);
+    if (raw.lineChars !== undefined && raw.lineChars !== "") next.lineChars = Math.max(2, Number(raw.lineChars) || 2);
+    if (raw.maxLines !== undefined && raw.maxLines !== "") next.maxLines = Math.max(1, Number(raw.maxLines) || 1);
+    if (Object.keys(next).length) normalized[language] = next;
+  }
+  return normalized;
 }
 
 function exportWords() {
@@ -2012,7 +2843,81 @@ function exportWords() {
     hungarian: word.hungarian || "",
     lockedFields: word.lockedFields || [],
     original: word.original || {},
+    overrides: normalizeWordOverrides(word.overrides),
   }));
+}
+
+function wordText(word, language) {
+  if (language === "chinese") return word.chinese || "";
+  if (language === "pinyin") return word.pinyin || "";
+  if (language === "english") return word.english || "";
+  if (language === "hungarian") return word.hungarian || "";
+  return word.target || "";
+}
+
+function languageField(language) {
+  return {
+    chinese: "chinese",
+    pinyin: "pinyin",
+    english: "english",
+    target: "target",
+    hungarian: "hungarian",
+  }[language] || "target";
+}
+
+function setWordText(rowIndex, language, value, markManual = true) {
+  const word = words[rowIndex];
+  const field = languageField(language);
+  if (!word || !field) return;
+  word[field] = value;
+  if (markManual && ["pinyin", ...TRANSLATION_FIELDS].includes(field)) {
+    word.lockedFields = Array.from(new Set([...(word.lockedFields || []), field]));
+  }
+}
+
+function originalWordText(wordId, language) {
+  const base = datasetBaseWords.find((item) => item.index === Number(wordId));
+  const word = base || words.find((item) => item.index === Number(wordId));
+  if (!word) return "";
+  const field = languageField(language);
+  if (TRANSLATION_FIELDS.includes(field)) return originalText(word, field);
+  return wordText(word, language);
+}
+
+function recommendedWordText(word, language) {
+  if (!word) return "";
+  const field = languageField(language);
+  if (!TRANSLATION_FIELDS.includes(field)) return originalWordText(word.index, language);
+  const limits = maxCharSettings();
+  const lineLimits = lineCharSettings();
+  const wordLimits = maxWordCharSettings();
+  return recommendTranslation(
+    originalText(word, field),
+    limits[field],
+    Math.min(wordLimits[field], lineLimits[field] || wordLimits[field]),
+    field
+  );
+}
+
+function wordOverride(word, language) {
+  return normalizeWordOverrides(word?.overrides)[language] || {};
+}
+
+function setWordOverride(rowIndex, language, key, rawValue) {
+  const word = words[rowIndex];
+  if (!word) return;
+  const overrides = normalizeWordOverrides(word.overrides);
+  const next = { ...(overrides[language] || {}) };
+  if (rawValue === "" || rawValue === undefined || rawValue === null) {
+    delete next[key];
+  } else if (key === "scale") {
+    next[key] = clamp(Number(rawValue) || 1, 0.2, 3);
+  } else {
+    next[key] = Math.max(1, Number(rawValue) || 1);
+  }
+  if (Object.keys(next).length) overrides[language] = next;
+  else delete overrides[language];
+  word.overrides = overrides;
 }
 
 function originalText(word, field) {
@@ -2027,15 +2932,34 @@ function maxCharSettings() {
   };
 }
 
+function lineCharSettings() {
+  return {
+    pinyin: numberValue("pinyinLineChars", 12),
+    english: numberValue("englishLineChars", 10),
+    target: numberValue("targetLineChars", 10),
+    hungarian: numberValue("hungarianLineChars", 11),
+  };
+}
+
+function maxWordCharSettings() {
+  return {
+    english: numberValue("englishMaxWordChars", 10),
+    target: numberValue("targetMaxWordChars", 10),
+    hungarian: numberValue("hungarianMaxWordChars", 10),
+  };
+}
+
 function applyRecommendationsToUnlocked(options = {}) {
   const limits = maxCharSettings();
+  const lineLimits = lineCharSettings();
+  const wordLimits = maxWordCharSettings();
   words = words.map((word) => {
     const next = { ...word, original: { ...(word.original || {}) }, lockedFields: [...(word.lockedFields || [])] };
     for (const field of TRANSLATION_FIELDS) {
       const isManual = next.lockedFields.includes(field);
       if (isManual && !options.force) continue;
       const source = originalText(next, field);
-      next[field] = recommendTranslation(source, limits[field], field);
+      next[field] = recommendTranslation(source, limits[field], Math.min(wordLimits[field], lineLimits[field] || wordLimits[field]), field);
       if (options.force) {
         next.lockedFields = next.lockedFields.filter((item) => item !== field);
       }
@@ -2044,21 +2968,21 @@ function applyRecommendationsToUnlocked(options = {}) {
   });
 }
 
-function recommendTranslation(text, maxChars, field) {
+function recommendTranslation(text, maxChars, maxWordChars, field) {
   const source = String(text || "").replace(/\s+/g, " ").trim();
   const limit = Math.max(4, Number(maxChars) || 18);
-  if (source.length <= limit) return source;
+  if (source.length <= limit) return breakLongWords(source, maxWordChars);
   const withoutNotes = source
     .replace(/\([^)]*\)/g, "")
     .replace(/\[[^\]]*\]/g, "")
     .replace(/\b(to be|to|a|an|the)\b/gi, "")
     .replace(/\s+/g, " ")
     .trim();
-  if (withoutNotes && withoutNotes.length <= limit) return withoutNotes;
+  if (withoutNotes && withoutNotes.length <= limit) return breakLongWords(withoutNotes, maxWordChars);
   const separators = field === "target" || field === "hungarian" ? /[;,|/]+/ : /[;,|/]+|\bor\b/gi;
   const parts = withoutNotes.split(separators).map((item) => item.trim()).filter(Boolean).sort((a, b) => a.length - b.length);
   const fitting = parts.find((item) => item.length <= limit);
-  if (fitting) return fitting;
+  if (fitting) return breakLongWords(fitting, maxWordChars);
   const wordsOnly = (parts[0] || withoutNotes || source).split(/\s+/).filter(Boolean);
   let result = "";
   for (const token of wordsOnly) {
@@ -2066,8 +2990,26 @@ function recommendTranslation(text, maxChars, field) {
     if (next.length > limit) break;
     result = next;
   }
-  if (result) return result;
-  return Array.from(source).slice(0, limit).join("");
+  if (result) return breakLongWords(result, maxWordChars);
+  return breakLongWords(Array.from(source).slice(0, limit).join(""), maxWordChars);
+}
+
+function breakLongWords(text, maxWordChars) {
+  const limit = Math.max(4, Number(maxWordChars) || 10);
+  return String(text || "")
+    .split(/(\s+|\/)/)
+    .map((part) => {
+      if (/^\s+$/.test(part) || part === "/" || Array.from(part).length <= limit) return part;
+      const chars = Array.from(part);
+      const chunks = [];
+      for (let i = 0; i < chars.length; i += limit) {
+        chunks.push(chars.slice(i, i + limit).join(""));
+      }
+      return chunks.join("\n");
+    })
+    .join("")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n");
 }
 
 async function fillKnownTranslations() {
@@ -2085,22 +3027,58 @@ async function fillKnownTranslations() {
 }
 
 function activeLanguages() {
-  return [...BASE_LANGUAGES, ["hungarian", extraLanguageLabel()]];
+  const labels = new Map(BASE_LANGUAGES);
+  if ($("showExtra")?.checked && extraLanguageLabel()) labels.set("extra", extraLanguageLabel());
+  const selected = selectedLanguageIds();
+  return selected.filter((id) => id !== "extra" || labels.has("extra")).map((id) => [id, labels.get(id) || id]);
+}
+
+function selectedLanguageIds() {
+  const ids = [
+    ["chinese", "showChinese"],
+    ["pinyin", "showPinyin"],
+    ["english", "showEnglish"],
+    ["target", "showTarget"],
+    ["hungarian", "showHungarian"],
+    ["extra", "showExtra"],
+  ].filter(([, checkboxId]) => $(checkboxId)?.checked).map(([id]) => id).filter((id) => id !== "extra" || Boolean(extraLanguageLabel()));
+  return ids.length ? ids : ["english", "target"];
+}
+
+function setSelectedLanguages(ids) {
+  const selected = new Set(ids || []);
+  const fallback = selected.size ? selected : new Set(["chinese", "pinyin", "english", "target", "hungarian"]);
+  [
+    ["chinese", "showChinese"],
+    ["pinyin", "showPinyin"],
+    ["english", "showEnglish"],
+    ["target", "showTarget"],
+    ["hungarian", "showHungarian"],
+    ["extra", "showExtra"],
+  ].forEach(([id, checkboxId]) => {
+    if ($(checkboxId)) $(checkboxId).checked = fallback.has(id);
+  });
+}
+
+function syncLanguageOrderToVisible() {
+  const selected = selectedLanguageIds();
+  const current = parseLanguageOrder().filter((id) => selected.includes(id));
+  const merged = [...current, ...selected.filter((id) => !current.includes(id))];
+  $("languageOrder").value = merged.join(",");
 }
 
 function extraLanguageLabel() {
-  return $("extraLanguageLabel")?.value.trim() || presetLanguageLabel($("extraLanguagePreset")?.value || "hungarian");
+  return $("extraLanguageLabel")?.value.trim() || "";
 }
 
 function presetLanguageLabel(value) {
   const labels = {
-    hungarian: "Hungarian",
     german: "German",
     spanish: "Spanish",
     french: "French",
-    custom: "Custom",
+    custom: "",
   };
-  return labels[value] || "Hungarian";
+  return labels[value] || "";
 }
 
 function handleExtraLanguagePreset() {
@@ -2111,6 +3089,7 @@ function handleExtraLanguagePreset() {
   applyRecommendationsToUnlocked();
   renderTable();
   renderPlates();
+  syncLanguageOrderToVisible();
   saveLocal();
 }
 

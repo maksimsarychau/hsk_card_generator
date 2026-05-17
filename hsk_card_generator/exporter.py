@@ -40,6 +40,8 @@ def export_zip(request: ExportRequest) -> dict:
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("README.md", _readme(request, selected_words, layout, tile_plans, dimensions))
         archive.writestr("source/export-request.json", json.dumps(_request_to_json(request), ensure_ascii=False, indent=2))
+        archive.writestr("source/settings.json", json.dumps(_settings_snapshot(request, colors), ensure_ascii=False, indent=2))
+        archive.writestr("source/text-overrides.json", json.dumps(_text_overrides(selected_words), ensure_ascii=False, indent=2))
         archive.writestr("source/layout-preview.json", json.dumps(layout, ensure_ascii=False, indent=2))
         archive.writestr("source/game-plan.json", json.dumps(game_plan, ensure_ascii=False, indent=2))
         archive.writestr("source/card-plan.json", json.dumps(_card_plan(request, selected_words, tile_plans), ensure_ascii=False, indent=2))
@@ -100,7 +102,7 @@ def _build_all_parts(request: ExportRequest, words: list, layout: dict, tile_pla
     if _single_card_game(request.gameMode):
         for card in game_plan.get("cards") or []:
             pos = _position_from_dict(positions_by_index[card["cardId"]])
-            parts.extend(build_game_card_parts(card["cardId"], card["wordId"], card["languageCode"], card["text"], request.gameMode, pos, request.design))
+            parts.extend(build_game_card_parts(card["cardId"], card["wordId"], card["languageCode"], card["text"], request.gameMode, pos, request.design, card.get("overrides") or None))
         return parts
 
     if tile_plans:
@@ -162,7 +164,9 @@ def _write_card_separate_stls(archive: zipfile.ZipFile, parts: list[Part]) -> No
 
 
 def _build_plate_labels(request: ExportRequest, layout: dict, parts: list[Part], tile_plans: list[TilePlan]) -> list[Part]:
-    enabled = request.plateLabel.mode == "visible" or (request.gameMode != "flashcards" and request.plateLabel.mode != "none")
+    if request.gameMode == "flashcards":
+        return []
+    enabled = request.plateLabel.mode == "visible" or request.plateLabel.mode != "none"
     if not enabled or not parts:
         return []
     labels: list[Part] = []
@@ -201,16 +205,17 @@ def _write_whole_plate_3mfs(archive: zipfile.ZipFile, parts: list[Part], colors:
         grouped[(part.language, part.page)].append(part)
     for (language, page), plate_parts in grouped.items():
         layer_parts = _plate_layer_parts(language, page, plate_parts)
+        plate_name = _plate_file_stem(language, page)
         archive.writestr(
-            f"plates_3mf/{language}_page_{page + 1:02d}.3mf",
+            f"plates_3mf/{plate_name}.3mf",
             build_3mf_assembly(layer_parts, _plate_title(language, page, metadata), colors, metadata),
         )
         archive.writestr(
-            f"3mf_whole_plate_single/{language}/page_{page + 1:02d}.3mf",
+            f"3mf_whole_plate_single/{_language_file_label(language)}/page_{page + 1:02d}.3mf",
             build_3mf_single_object(plate_parts, f"{_plate_title(language, page, metadata)} single", colors, metadata),
         )
         archive.writestr(
-            f"3mf_whole_plate_per_card_objects/{language}/page_{page + 1:02d}.3mf",
+            f"3mf_whole_plate_per_card_objects/{_language_file_label(language)}/page_{page + 1:02d}.3mf",
             build_3mf(plate_parts, f"{_plate_title(language, page, metadata)} per-card", colors, metadata),
         )
 
@@ -225,7 +230,8 @@ def _plate_layer_parts(language: Language, page: int, plate_parts: list[Part]) -
         meshes = grouped.get(role)
         if not meshes:
             continue
-        layers.append(Part(f"{language}_page_{page + 1:02d}_{role}", role, merge_meshes(f"{language}_{page}_{role}", meshes), language, page))
+        label = _language_file_label(language)
+        layers.append(Part(f"{label}_page_{page + 1:02d}_{role}", role, merge_meshes(f"{label}_{page}_{role}", meshes), language, page))
     return layers
 
 
@@ -244,6 +250,8 @@ def _manifest(parts: list[Part], request: ExportRequest, layout: dict, tile_plan
         "domino": request.domino.__dict__ if request.gameMode == "domino" else None,
         "tileCount": len(tile_plans) if tile_plans else None,
         "colors": colors,
+        "settings": _settings_snapshot(request, colors),
+        "textOverrideCount": sum(len((word.overrides or {})) for word in request.words),
         "dimensions": dimensions,
         "plateLabel": request.plateLabel.__dict__,
         "printProfile": request.printProfile.__dict__,
@@ -254,8 +262,9 @@ def _manifest(parts: list[Part], request: ExportRequest, layout: dict, tile_plan
         "plates": [
             {
                 "language": language,
+                "languageLabel": _language_file_label(language),
                 "page": page + 1,
-                "primary3mf": f"plates_3mf/{language}_page_{page + 1:02d}.3mf",
+                "primary3mf": f"plates_3mf/{_plate_file_stem(language, page)}.3mf",
                 "primaryStl": f"plates_stl/{language}_page_{page + 1:02d}.stl",
                 "layerObjectCount": len(roles_by_plate[(language, page)]),
                 "layers": roles_by_plate[(language, page)],
@@ -290,7 +299,28 @@ def _write_3mf_variants(archive: zipfile.ZipFile, parts: list[Part], colors: dic
 
 
 def _plate_title(language: str, page: int, metadata: dict[str, str]) -> str:
-    return f"{metadata.get('Dataset', 'HSK')}_{metadata.get('Range', '')}_{metadata.get('GameMode', '')}_{language}_page_{page + 1:02d}"
+    return f"{metadata.get('Dataset', 'HSK')}_{metadata.get('Range', '')}_{metadata.get('GameMode', '')}_{_language_file_label(language)}_page_{page + 1:02d}"
+
+
+def _language_file_label(language: str) -> str:
+    labels = {
+        "chinese": "Chinese",
+        "pinyin": "Pinyin",
+        "english": "English",
+        "target": "Russian",
+        "hungarian": "Hungarian",
+        "domino": "Domino",
+        "matching": "Matching",
+        "memory": "Memory",
+        "pair_cards": "PairCards",
+        "modular_expansion": "ModularExpansion",
+        "mixed_challenge": "MixedChallenge",
+    }
+    return labels.get(language, "".join(part.capitalize() for part in str(language).replace("-", "_").split("_") if part) or "Plate")
+
+
+def _plate_file_stem(language: str, page: int) -> str:
+    return f"{_language_file_label(language)}_page_{page + 1:02d}"
 
 
 def mesh_to_stl(mesh: Mesh) -> str:
@@ -351,7 +381,7 @@ def _model_xml(parts: list[Part], variant: str, colors_by_role: dict[str, str], 
     object_xml: list[str] = []
     build_items: list[str] = []
     for object_id, part in enumerate(parts, start=1):
-        color = colors_by_role.get(part.role, "#cccccc")
+        color = _part_color(part, colors_by_role)
         object_xml.append(f'<object id="{object_id}" type="model" name="{escape(part.name)}" pid="1" pindex="{_color_index(color, colors_by_role)}">')
         object_xml.append("<mesh><vertices>")
         for x, y, z in part.mesh.vertices:
@@ -380,7 +410,7 @@ def _assembly_model_xml(parts: list[Part], variant: str, colors_by_role: dict[st
     object_xml: list[str] = []
     component_xml: list[str] = []
     for object_id, part in enumerate(parts, start=1):
-        color = colors_by_role.get(part.role, "#cccccc")
+        color = _part_color(part, colors_by_role)
         object_xml.append(f'<object id="{object_id}" type="model" name="{escape(part.name)}" pid="1" pindex="{_color_index(color, colors_by_role)}">')
         object_xml.append("<mesh><vertices>")
         for x, y, z in part.mesh.vertices:
@@ -412,7 +442,7 @@ def _single_object_model_xml(parts: list[Part], variant: str, colors_by_role: di
     vertices: list[tuple[float, float, float]] = []
     triangles: list[str] = []
     for part in parts:
-        color = colors_by_role.get(part.role, "#cccccc")
+        color = _part_color(part, colors_by_role)
         color_index = _color_index(color, colors_by_role)
         offset = len(vertices)
         vertices.extend(part.mesh.vertices)
@@ -445,6 +475,11 @@ def _ordered_colors(colors_by_role: dict[str, str] | None = None) -> list[str]:
         color = colors_by_role.get(role)
         if color and color not in ordered:
             ordered.append(color)
+    for key in sorted(colors_by_role):
+        if key.startswith("language:"):
+            color = colors_by_role.get(key)
+            if color and color not in ordered:
+                ordered.append(color)
     if "#cccccc" not in ordered:
         ordered.append("#cccccc")
     return ordered
@@ -455,6 +490,14 @@ def _color_index(color: str, colors_by_role: dict[str, str] | None = None) -> in
         return _ordered_colors(colors_by_role).index(color)
     except ValueError:
         return len(_ordered_colors(colors_by_role)) - 1
+
+
+def _part_color(part: Part, colors_by_role: dict[str, str]) -> str:
+    if part.role == "base":
+        language_color = colors_by_role.get(f"language:{part.language}")
+        if language_color:
+            return language_color
+    return colors_by_role.get(part.role, "#cccccc")
 
 
 def _content_types() -> str:
@@ -518,11 +561,39 @@ def _card_plan(request: ExportRequest, words: list, tile_plans: list[TilePlan]) 
     return {
         "mode": request.gameMode,
         "cards": [
-            {"cardId": f"{word.index:03d}_{language}", "wordId": word.index, "languageCode": language, "text": word.text_for(language)}
+            {
+                "cardId": f"{word.index:03d}_{language}",
+                "wordId": word.index,
+                "languageCode": language,
+                "text": word.text_for(language),
+                "overrides": (word.overrides or {}).get(language, {}),
+            }
             for word in words
             for language in request.languages
         ],
     }
+
+
+def _text_overrides(words: list[WordEntry]) -> dict:
+    entries = []
+    for word in words:
+        overrides = word.overrides or {}
+        if not overrides:
+            continue
+        entries.append(
+            {
+                "wordId": word.index,
+                "texts": {
+                    "chinese": word.chinese,
+                    "pinyin": word.pinyin,
+                    "english": word.english,
+                    "russian": word.target,
+                    "hungarian": word.hungarian,
+                },
+                "overrides": overrides,
+            }
+        )
+    return {"count": len(entries), "entries": entries}
 
 
 def _write_answer_sheets(archive: zipfile.ZipFile, request: ExportRequest, words: list, tile_plans: list[TilePlan], game_plan: dict) -> None:
@@ -746,6 +817,33 @@ def _request_to_json(request: ExportRequest) -> dict:
         "printProfile": request.printProfile.__dict__,
         "textFit": request.textFit.__dict__,
         "simulator": request.simulator.__dict__,
+        "ui": request.ui,
+    }
+
+
+def _settings_snapshot(request: ExportRequest, active_colors: dict[str, str]) -> dict:
+    return {
+        "datasetId": request.datasetId,
+        "gameMode": request.gameMode,
+        "languages": request.languages,
+        "range": {"start": request.rangeStart, "end": request.rangeEnd},
+        "printer": request.printer.__dict__,
+        "design": request.design.__dict__,
+        "domino": request.domino.__dict__,
+        "plateLabel": request.plateLabel.__dict__,
+        "printProfile": request.printProfile.__dict__,
+        "textFit": request.textFit.__dict__,
+        "simulator": request.simulator.__dict__,
+        "colors": {
+            "requested": request.colors,
+            "active3mfColors": active_colors,
+        },
+        "ui": request.ui,
+        "notes": {
+            "allGeometryAffectingSettings": "Stored here and in source/export-request.json.",
+            "perWordTextOverrides": "Stored in source/text-overrides.json and repeated in source/card-plan.json or source/tile-plan.json.",
+            "bambuProfile": "Standard 3MF metadata is included; Bambu-specific project profile application remains recommendations-only until compatibility validation.",
+        },
     }
 
 
@@ -755,4 +853,8 @@ def _active_colors(request: ExportRequest) -> dict[str, str]:
     for role, value in (role_colors or {}).items():
         if role in colors and isinstance(value, str) and value.startswith("#") and len(value) in (4, 7):
             colors[role] = value
+    language_colors = request.colors.get("languages") if isinstance(request.colors.get("languages"), dict) else {}
+    for language, value in (language_colors or {}).items():
+        if isinstance(value, str) and value.startswith("#") and len(value) in (4, 7):
+            colors[f"language:{language}"] = value
     return colors

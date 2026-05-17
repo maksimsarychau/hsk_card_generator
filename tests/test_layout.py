@@ -35,6 +35,8 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(get_dataset("hsk2_old")["count"], 300)
         self.assertEqual(get_dataset("hsk1_new")["count"], 300)
         self.assertEqual(get_dataset("hsk2_new")["count"], 497)
+        self.assertEqual(get_dataset("top_english_300")["count"], 300)
+        self.assertEqual(get_dataset("top_hungarian_300")["count"], 300)
 
     def test_card_design_from_dict_preserves_zero_settings(self) -> None:
         design = CardDesign.from_dict(

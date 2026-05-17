@@ -22,9 +22,13 @@ class TileHalf:
     wordId: int
     languageCode: str
     text: str
+    overrides: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"wordId": self.wordId, "languageCode": self.languageCode, "text": self.text}
+        data = {"wordId": self.wordId, "languageCode": self.languageCode, "text": self.text}
+        if self.overrides:
+            data["overrides"] = self.overrides
+        return data
 
 
 @dataclass(frozen=True)
@@ -84,6 +88,7 @@ def build_game_plan(words: list[WordEntry], game_mode: str, settings: DominoSett
                 "wordId": word.index,
                 "languageCode": language,
                 "text": tile_text(word, language).strip() or "?",
+                "overrides": _word_overrides(word, language) or {},
             }
             for word in words
             for language in _valid_language_order(settings.languageOrder)
@@ -260,13 +265,18 @@ def _tile(
     return TilePlan(
         cardId=card_id,
         tileType=tile_type,
-        left=TileHalf(left_word.index, left_language, tile_text(left_word, left_language).strip() or "?"),
-        right=TileHalf(right_word.index, right_language, tile_text(right_word, right_language).strip() or "?"),
+        left=TileHalf(left_word.index, left_language, tile_text(left_word, left_language).strip() or "?", _word_overrides(left_word, left_language)),
+        right=TileHalf(right_word.index, right_language, tile_text(right_word, right_language).strip() or "?", _word_overrides(right_word, right_language)),
         backIds=(left_word.index, right_word.index),
         generationMode=settings.density,
         rulesMode=settings.rulesMode,
         branchPoint=branch_point,
     )
+
+
+def _word_overrides(word: WordEntry, language: str) -> dict[str, Any] | None:
+    value = (getattr(word, "overrides", None) or {}).get(language)
+    return value if isinstance(value, dict) and value else None
 
 
 def _simulate_tiles(tiles: list[TilePlan], settings: SimulatorSettings) -> dict[str, Any]:

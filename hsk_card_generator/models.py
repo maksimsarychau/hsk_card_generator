@@ -5,9 +5,11 @@ from typing import Any, Literal
 
 
 Language = Literal["chinese", "pinyin", "english", "target", "hungarian"]
+SUPPORTED_LANGUAGES = {"chinese", "pinyin", "english", "target", "hungarian"}
 LockedField = Literal["pinyin", "english", "target", "hungarian"]
 HanziGuideMode = Literal["none", "tian_4", "mi_8"]
 BackNumberMode = Literal["deboss", "deboss_colored"]
+TextRenderMode = Literal["raster_blocks", "raster_fine", "proxy_blocks"]
 RowsColumns = int | Literal["auto"]
 GameMode = Literal["flashcards", "matching", "memory", "pair_cards", "domino", "modular_expansion", "mixed_challenge"]
 DominoDensity = Literal["compact", "target_count", "complete_cycle"]
@@ -24,6 +26,7 @@ class WordEntry:
     target: str = ""
     hungarian: str = ""
     lockedFields: list[LockedField] = field(default_factory=list)
+    overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], fallback_index: int = 1) -> "WordEntry":
@@ -35,6 +38,7 @@ class WordEntry:
             target=str(data.get("target") or data.get("russian") or ""),
             hungarian=str(data.get("hungarian") or data.get("hu") or ""),
             lockedFields=list(data.get("lockedFields") or []),
+            overrides=dict(data.get("overrides") or {}),
         )
 
     def text_for(self, language: Language) -> str:
@@ -57,6 +61,7 @@ class WordEntry:
             "target": self.target,
             "hungarian": self.hungarian,
             "lockedFields": self.lockedFields,
+            "overrides": self.overrides,
         }
 
 
@@ -106,6 +111,11 @@ class CardDesign:
     targetTextScale: float = 1.0
     hungarianTextScale: float = 1.0
     hanziGuideScale: float = 1.0
+    textRenderMode: TextRenderMode = "raster_blocks"
+    pinyinLineChars: int = 12
+    englishLineChars: int = 10
+    targetLineChars: int = 10
+    hungarianLineChars: int = 11
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "CardDesign":
@@ -119,6 +129,10 @@ class CardDesign:
         def number(key: str, default: float) -> float:
             value = data.get(key)
             return default if value is None or value == "" else float(value)
+
+        def integer(key: str, default: int) -> int:
+            value = data.get(key)
+            return default if value is None or value == "" else max(1, int(value))
 
         return cls(
             widthMm=number("widthMm", 30.0),
@@ -140,6 +154,11 @@ class CardDesign:
             targetTextScale=number("targetTextScale", 1.0),
             hungarianTextScale=number("hungarianTextScale", 1.0),
             hanziGuideScale=number("hanziGuideScale", 1.0),
+            textRenderMode=data.get("textRenderMode") or "raster_blocks",
+            pinyinLineChars=integer("pinyinLineChars", 12),
+            englishLineChars=integer("englishLineChars", 10),
+            targetLineChars=integer("targetLineChars", 10),
+            hungarianLineChars=integer("hungarianLineChars", 11),
         )
 
 
@@ -279,6 +298,7 @@ class ExportRequest:
     printProfile: PrintProfileSettings = field(default_factory=PrintProfileSettings)
     textFit: TextFitSettings = field(default_factory=TextFitSettings)
     simulator: SimulatorSettings = field(default_factory=SimulatorSettings)
+    ui: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ExportRequest":
@@ -288,9 +308,10 @@ class ExportRequest:
         plate_label = PlateLabelSettings.from_dict(data.get("plateLabel"))
         if data.get("plateLabel") is None and game_mode != "flashcards":
             plate_label.mode = "visible"
+        languages = [item for item in (data.get("languages") or ["chinese", "pinyin", "english", "target", "hungarian"]) if item in SUPPORTED_LANGUAGES]
         return cls(
             words=words,
-            languages=list(data.get("languages") or ["chinese", "pinyin", "english", "target", "hungarian"]),
+            languages=languages or ["chinese", "pinyin", "english", "target", "hungarian"],
             rangeStart=int(data.get("rangeStart") or 1),
             rangeEnd=int(data.get("rangeEnd") or max(1, len(words))),
             printer=PrinterProfile.from_dict(data.get("printer")),
@@ -304,4 +325,5 @@ class ExportRequest:
             printProfile=PrintProfileSettings.from_dict(data.get("printProfile")),
             textFit=TextFitSettings.from_dict(data.get("textFit")),
             simulator=SimulatorSettings.from_dict(data.get("simulator")),
+            ui=dict(data.get("ui") or {}),
         )
